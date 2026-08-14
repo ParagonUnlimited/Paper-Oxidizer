@@ -105,10 +105,38 @@ def _parse_users(raw):
 
 
 USERS = _parse_users(os.environ.get("REVIEW_USERS"))
-# Single-user local use keeps working with no login at all.
-SOLO = (os.environ.get("REVIEWER") or "").strip().lower() if not USERS else ""
-SECRET = (os.environ.get("SESSION_SECRET")
-          or os.environ.get("NEON_DATABASE_URL") or "dev").encode()
+LOOPBACK = HOST in ("127.0.0.1", "localhost", "::1")
+
+# FAIL CLOSED.
+#
+# The obvious way to keep single-machine use frictionless is "no REVIEW_USERS
+# means no login". That is a trapdoor: REVIEW_USERS arriving empty on the server
+# -- unset in Coolify, a typo, a missing colon, a secret that failed to inject --
+# would not break anything visibly. It would publish 1,464 probate documents,
+# including bank statements and a creditor's claim against the estate, to anyone
+# who found the URL. A misconfiguration must never widen access.
+#
+# So: no credentials is only tolerable when nothing outside this machine can
+# reach the socket. Bound anywhere else, the process refuses to start. The
+# container sets HOST=0.0.0.0, which makes a missing REVIEW_USERS a loud crash
+# in the deploy log instead of a silent exposure.
+if not USERS and not LOOPBACK:
+    sys.exit("REFUSING TO START: REVIEW_USERS is empty and HOST=%s is not "
+             "loopback.\nThat combination would serve every document with no "
+             "authentication.\nSet REVIEW_USERS='name:password,name:password'."
+             % HOST)
+
+# Solo mode: loopback only, and only because the socket is unreachable remotely.
+SOLO = ((os.environ.get("REVIEWER") or "alden").strip().lower()
+        if not USERS else "")
+
+# The signing key must be its own secret. Falling back to NEON_DATABASE_URL
+# would make a cookie-signing key out of a database credential -- one leak, two
+# compromises -- and a hardcoded default would let anyone mint a valid cookie.
+if USERS and not os.environ.get("SESSION_SECRET"):
+    sys.exit("REFUSING TO START: SESSION_SECRET is required when REVIEW_USERS "
+             "is set.\nWithout it the login cookie cannot be signed safely.")
+SECRET = (os.environ.get("SESSION_SECRET") or "loopback-solo-mode").encode()
 
 
 # ocr_reading carries a UNIQUE constraint on (page_id, method) --
@@ -443,10 +471,11 @@ def make_cookie(reviewer):
 def cookie_reviewer(header):
     """Whoever this request is, or None. Never trusts the name without the
     signature -- otherwise anyone could write corrections as anyone."""
+    # SOLO is only ever set when the listener is loopback-bound (enforced at
+    # startup). There is deliberately no other path that returns a reviewer
+    # without a verified signature.
     if SOLO:
         return SOLO
-    if not USERS:
-        return "alden"
     for part in (header or "").split(";"):
         part = part.strip()
         if not part.startswith("rev="):
@@ -512,9 +541,13 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_response(302)
         self.send_header("Location", to)
         if cookie:
+            # Secure off-loopback: Coolify terminates TLS in front, so the
+            # cookie must never be allowed onto a plaintext hop. Left off for
+            # local http so the laptop case still works.
             self.send_header("Set-Cookie",
-                             "rev=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
-                             % cookie)
+                             "rev=%s; Path=/; HttpOnly; SameSite=Lax; "
+                             "Max-Age=2592000%s"
+                             % (cookie, "" if LOOPBACK else "; Secure"))
         self.send_header("Content-Length", "0")
         self.end_headers()
 

@@ -55,6 +55,37 @@ Steps 2–4 are resumable: re-running skips what already exists.
 `recut/` PDFs** — which is exactly how it runs on Alden's laptop today. Same
 file, no branch, no second version to keep in step.
 
+## The app refuses to start rather than run unauthenticated
+
+If `REVIEW_USERS` is empty or malformed **and** `HOST` is not loopback, the
+process exits with a non-zero status and an explicit message. It does not start
+in an open state.
+
+This matters because the failure it prevents is invisible: an env var that fails
+to inject in Coolify, or `REVIEW_USERS=alden` with the colon missing, would
+otherwise leave the app serving 1,464 probate documents — bank statements, an
+EIN letter, a creditor's claim against the estate — to anyone who found the URL,
+with nothing in the logs to say so. **A misconfiguration must never widen
+access.** The container sets `HOST=0.0.0.0`, so that mistake becomes a crash in
+the deploy log instead.
+
+`SESSION_SECRET` is likewise mandatory whenever `REVIEW_USERS` is set — the
+cookie-signing key has to be its own secret rather than borrowed from the
+database URL.
+
+No-login solo mode is still available, but **only** on a loopback bind, where the
+socket is unreachable from outside the machine.
+
+## Tests
+
+```bash
+uv run smoke_test.py        # needs NEON_DATABASE_URL; 16 checks
+```
+
+Covers solo mode, anonymous refusal, wrong password, forged cookie signature, an
+unknown user presenting a validly-signed cookie, and the three fail-closed
+startup guards.
+
 ## Coolify
 
 1. New resource → Docker Compose → point at this repo, `review/docker-compose.yml`
