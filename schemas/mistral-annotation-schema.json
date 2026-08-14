@@ -1,0 +1,869 @@
+{
+  "type": "object",
+  "description": "Full extraction from a scanned PDF out of a personal financial and legal archive (probate, household bills, taxes, banking, insurance, court papers). The PDF may be ONE document or MANY unrelated documents scanned together, possibly out of order. Segment first, then extract. Copy values exactly as printed; use null for anything not printed. Never guess.",
+  "properties": {
+    "file_kind": {
+      "type": "string",
+      "enum": [
+        "single_document",
+        "merged_multi_document",
+        "unclear"
+      ],
+      "description": "Whether this PDF is one document or several scanned together."
+    },
+    "page_count_seen": {
+      "type": "integer",
+      "description": "Total pages you were given."
+    },
+    "documents": {
+      "type": "array",
+      "description": "Every distinct document found. A document is paperwork one sender produced as one unit (a bill, a notice, a form, a letter). EVERY page must appear in exactly one document's pages list or in unassigned_pages -- the counts must add up.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pages": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "1-based page numbers of THIS PDF belonging to this document, in correct READING order -- which may differ from scan order. If you reordered, say why in confidence_notes."
+          },
+          "doc_kind": {
+            "type": "string",
+            "enum": [
+              "utility_bill",
+              "billing_statement",
+              "bank_statement",
+              "mortgage_statement",
+              "credit_card_statement",
+              "escrow_statement",
+              "irs_notice",
+              "state_tax_notice",
+              "property_tax_bill",
+              "w2_form",
+              "form_1095",
+              "paystub_or_earnings_statement",
+              "payment_voucher",
+              "insurance_document",
+              "court_or_probate_filing",
+              "creditor_claim",
+              "collection_letter",
+              "letter_correspondence",
+              "check_or_check_copy",
+              "receipt",
+              "envelope",
+              "form_other",
+              "other"
+            ],
+            "description": "Closest match. Use 'other' plus other_kind when nothing fits."
+          },
+          "other_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What this actually is, when doc_kind is 'other' or the enum label loses detail (e.g. 'IRS CP14 balance due notice', 'DE-172 creditor claim')."
+          },
+          "title_suggestion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short filing title: issuer + kind + identifying date, e.g. 'IRS CP14 Notice TY2019 2022-06-06'."
+          },
+          "issuer": {
+            "type": "object",
+            "description": "The organization that produced this document.",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Exactly as printed, e.g. 'San Jose Water Company'."
+              },
+              "department": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "address": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "phone": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "website": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "department",
+              "address",
+              "phone",
+              "website"
+            ],
+            "additionalProperties": false
+          },
+          "addressee": {
+            "type": "object",
+            "description": "Who the document is addressed to.",
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "EXACTLY as printed -- 'ROBERT N DOBBINS' and 'ROBERT ALDEN DOBBINS' are different strings and the difference matters. Never normalize names."
+              },
+              "address": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "address"
+            ]
+          },
+          "people_named": {
+            "type": "array",
+            "description": "Every person named anywhere in the document, with the role the document gives them.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Exactly as printed. Do not merge similar names."
+                },
+                "role_or_context": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "e.g. 'account holder', 'co-owner', 'decedent', 'attorney for creditor', 'signer'."
+                }
+              },
+              "required": [
+                "name",
+                "role_or_context"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "properties_or_addresses_referenced": {
+            "type": "array",
+            "description": "Every property or address referenced, with the ROLE it plays. The role is what allows an expense to be attributed to a specific property.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "address_as_printed": {
+                  "type": "string",
+                  "description": "Verbatim, including unit or suite."
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "service_address",
+                    "mailing_address",
+                    "property_taxed",
+                    "collateral_property",
+                    "remit_to_address",
+                    "return_address",
+                    "decedent_residence",
+                    "insured_property",
+                    "property_sold",
+                    "other",
+                    "unclear"
+                  ]
+                }
+              },
+              "required": [
+                "address_as_printed",
+                "role"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "account_numbers": {
+            "type": "array",
+            "description": "ALL account-like numbers, each with its printed label. One document often carries several (loan number + escrow number + reference number).",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "As printed: 'Account Number', 'Loan #', 'Customer ID'..."
+                },
+                "value": {
+                  "type": "string",
+                  "description": "Verbatim, including dashes and spacing."
+                }
+              },
+              "required": [
+                "label",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "case_or_reference_numbers": {
+            "type": "array",
+            "description": "Court case numbers, docket numbers, notice numbers, claim numbers, tax years.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "doc_date": {
+            "type": "string",
+            "description": "The ONE date that files and sorts this document -- normally the printed statement/notice/letter date -- as YYYY-MM-DD. NOT a due date, NOT a scan date. Every date including this one also belongs in dates[] with its meaning; this field only designates the sort key."
+          },
+          "dates": {
+            "type": "array",
+            "description": "EVERY date printed or referenced on this document, each classified by what it MEANS. One document may carry many -- a bill can have a posted date, a service period, a due-by date, a referenced 'we contacted you on' date, and a payment-received date. Never collapse them and never omit one because another seems more important. The printed label is data.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date_type": {
+                  "type": "string",
+                  "enum": [
+                    "document_date",
+                    "posted",
+                    "due_by",
+                    "service_date",
+                    "service_period_start",
+                    "service_period_end",
+                    "appointment",
+                    "billing_month",
+                    "billing_year",
+                    "tax_year",
+                    "transaction",
+                    "paid_on",
+                    "payment_received",
+                    "communicated_on",
+                    "proposed",
+                    "renewal",
+                    "expiration",
+                    "travel",
+                    "flight",
+                    "court_date",
+                    "ticket_date",
+                    "available_on",
+                    "available_by",
+                    "closing",
+                    "received_stamp",
+                    "postmark",
+                    "date_of_death",
+                    "late_after",
+                    "other"
+                  ],
+                  "description": "The MEANING of this date. Use 'other' plus date_type_other when none fits."
+                },
+                "date_type_other": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The meaning when date_type is 'other': 'reinstatement deadline', 'escrow analysis date', 'policy effective date'..."
+                },
+                "date_value": {
+                  "type": "string",
+                  "description": "YYYY-MM-DD when a full date is printed; otherwise verbatim as printed ('June 2021', 'TY2019', 'within 30 days of this notice')."
+                },
+                "label_as_printed": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The exact printed label next to the date: 'Statement Date', 'Due By', 'Posted', 'Hearing Date', 'Pay By'..."
+                },
+                "applies_to": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "What this date attaches to, when stated: 'water service at 236 Bellerose Dr', 'Department 12 hearing', 'flight segment'..."
+                },
+                "consequence_if_missed": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Only when the document states one for this date: late fee amount, levy, lien, cancellation, foreclosure, default judgment."
+                }
+              },
+              "required": [
+                "date_type",
+                "date_type_other",
+                "date_value",
+                "label_as_printed",
+                "applies_to",
+                "consequence_if_missed"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "amounts": {
+            "type": "array",
+            "description": "Every labeled monetary amount. Give BOTH the verbatim string and a normalized numeric, so totals can be computed without re-parsing text.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Verbatim label as printed."
+                },
+                "value": {
+                  "type": "string",
+                  "description": "Exactly as printed, including currency symbol and any CR/DR marks or parentheses."
+                },
+                "amount_numeric": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Normalized for arithmetic: digits with at most one decimal point, optional leading minus for credits, refunds and payments out. NO currency symbol, NO thousands separators. Example: -1234.56 . Null if not a single parseable amount."
+                },
+                "currency": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "ISO code if determinable, e.g. USD. Null if not shown."
+                },
+                "amount_role": {
+                  "type": "string",
+                  "enum": [
+                    "total_due",
+                    "minimum_due",
+                    "previous_balance",
+                    "ending_balance",
+                    "payment_received",
+                    "credit",
+                    "refund",
+                    "new_charges",
+                    "subtotal",
+                    "tax",
+                    "late_fee",
+                    "interest",
+                    "principal",
+                    "escrow",
+                    "insurance",
+                    "penalty",
+                    "adjustment",
+                    "discount",
+                    "deposit",
+                    "withdrawal",
+                    "fee_other",
+                    "amount_paid",
+                    "amount_enclosed",
+                    "past_due",
+                    "credit_limit",
+                    "available_credit",
+                    "payoff_amount",
+                    "assessed_value",
+                    "gross_pay",
+                    "net_pay",
+                    "withholding",
+                    "other"
+                  ],
+                  "description": "What this amount represents. Use other only when none fit."
+                },
+                "sign_as_printed": {
+                  "type": "string",
+                  "enum": [
+                    "debit",
+                    "credit",
+                    "unspecified"
+                  ],
+                  "description": "credit if marked CR, shown in parentheses, or otherwise indicated as a reduction."
+                }
+              },
+              "required": [
+                "label",
+                "value",
+                "amount_numeric",
+                "currency",
+                "amount_role",
+                "sign_as_printed"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "running_balance": {
+            "type": "object",
+            "description": "The balance chain when this is a statement -- lets consecutive statements be ordered and gaps detected.",
+            "properties": {
+              "previous_balance": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "payments_received": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "new_charges": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ending_balance": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "previous_balance",
+              "payments_received",
+              "new_charges",
+              "ending_balance"
+            ]
+          },
+          "meter_or_usage_readings": {
+            "type": "array",
+            "description": "Utility meter readings or usage figures, verbatim -- readings are sequential and identify a bill uniquely.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "'Previous Read', 'Current Read', 'Total kWh', 'CCF'..."
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "pagination_evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every printed pagination marker with the PDF page it sits on, e.g. 'pdf p12: Page 2 of 6'."
+          },
+          "is_complete_document": {
+            "type": "boolean",
+            "description": "True only if the pages present appear to be the whole document."
+          },
+          "missing_content_evidence": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why you believe pages are missing: 'says Page 1 of 4, only 2 pages present', 'sentence cut mid-line', 'references an enclosed form not present'."
+          },
+          "duplicate_indicators": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Print-shop footer codes, mailing batch numbers, 'COPY' stamps -- e.g. '14458_757657_26485A', 'BL-5707760_004'. These identify identical mailings."
+          },
+          "handwriting": {
+            "type": "array",
+            "description": "Every handwritten mark, stamp, or highlight anywhere on this document.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pdf_page": {
+                  "type": "integer"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "note",
+                    "signature",
+                    "highlight",
+                    "stamp",
+                    "checkmark",
+                    "circled",
+                    "other"
+                  ]
+                },
+                "transcription": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Verbatim if legible; 'illegible' if not. Never invent."
+                },
+                "location_on_page": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "'top margin', 'over the total', 'signature line'..."
+                }
+              },
+              "required": [
+                "pdf_page",
+                "kind",
+                "transcription",
+                "location_on_page"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "legibility_issues": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Faded print, skew, cut-off edges, wash-out -- and which pages."
+          },
+          "summary": {
+            "type": "string",
+            "description": "One to three sentences: what this document is and what it says happened or must happen."
+          },
+          "suggested_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filing tags this document earns: matter (probate/tax/employment/household), property, purpose (deadline-bearing, estate-expense, evidence, income-proof)."
+          },
+          "extraction_confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "description": "Your confidence in THIS document's grouping and extraction."
+          },
+          "confidence_notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What you were unsure about: ambiguous page grouping, reordering you applied, unreadable regions."
+          },
+          "line_items": {
+            "type": "array",
+            "description": "Individual transaction or charge rows from statements, invoices, itemized bills and ledgers. One entry per printed row, in printed order. Empty array if the document has no itemized rows.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "line_date": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Date on the row. ISO 8601 if unambiguous, else verbatim. Null if none."
+                },
+                "posted_date": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Separate posting or settlement date, if the row shows two dates."
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Row description exactly as printed."
+                },
+                "merchant_or_payee": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Merchant, payee or counterparty if separable from the description."
+                },
+                "amount_as_printed": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Row amount exactly as printed."
+                },
+                "amount_numeric": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Normalized for arithmetic: digits with at most one decimal point, optional leading minus for credits, refunds and payments out. NO currency symbol, NO thousands separators. Example: -1234.56 . Null if not a single parseable amount."
+                },
+                "line_type": {
+                  "type": "string",
+                  "enum": [
+                    "charge",
+                    "payment",
+                    "credit",
+                    "refund",
+                    "fee",
+                    "interest",
+                    "transfer",
+                    "withdrawal",
+                    "deposit",
+                    "adjustment",
+                    "tax",
+                    "unknown"
+                  ]
+                },
+                "running_balance_after": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Balance printed on this row, if the statement carries one."
+                },
+                "reference_or_transaction_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Transaction, confirmation or reference number printed on the row."
+                },
+                "card_or_account_last4": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Last 4 digits only, if the row identifies which card or account was used. Never record more than 4 digits here."
+                }
+              },
+              "required": [
+                "line_date",
+                "posted_date",
+                "description",
+                "merchant_or_payee",
+                "amount_as_printed",
+                "amount_numeric",
+                "line_type",
+                "running_balance_after",
+                "reference_or_transaction_id",
+                "card_or_account_last4"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "payment_instruments": {
+            "type": "array",
+            "description": "How money actually moved, where the document shows it: checks, card payments, transfers, autopay. This is the evidence of WHO paid. Empty array if none shown.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "check",
+                    "ach_transfer",
+                    "wire",
+                    "credit_card",
+                    "debit_card",
+                    "cash",
+                    "money_order",
+                    "cashiers_check",
+                    "autopay",
+                    "online_payment",
+                    "payroll_deduction",
+                    "escrow_disbursement",
+                    "other",
+                    "unknown"
+                  ]
+                },
+                "check_number": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Check number, if a check or check copy."
+                },
+                "identifier_last4": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Last 4 of the card or account used. Never more than 4 digits."
+                },
+                "bank_or_issuer": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Bank or card issuer name as printed."
+                },
+                "memo_line": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Memo or FOR line, verbatim. Often states what the payment was for."
+                },
+                "amount_numeric": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Normalized for arithmetic: digits with at most one decimal point, optional leading minus for credits, refunds and payments out. NO currency symbol, NO thousands separators. Example: -1234.56 . Null if not a single parseable amount."
+                },
+                "payer_name_as_printed": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Name printed on the instrument, verbatim. NEVER normalize or merge similar names."
+                }
+              },
+              "required": [
+                "method",
+                "check_number",
+                "identifier_last4",
+                "bank_or_issuer",
+                "memo_line",
+                "amount_numeric",
+                "payer_name_as_printed"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "account_holder_names": {
+            "type": "array",
+            "description": "Every name shown as an owner or holder of the account, policy or obligation on this document, VERBATIM and never normalized or merged. This is the estate-versus-personal hinge: it distinguishes the decedent's accounts from the family's.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "transaction_parties": {
+            "type": "object",
+            "properties": {
+              "payer_name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Who owes or pays, verbatim. On a bill this is usually the addressee; on a check, the account holder."
+              },
+              "payee_name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Who is owed or paid, verbatim. On a bill this is usually the issuer."
+              },
+              "on_behalf_of": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Third party the payment is for, if stated, e.g. Estate of ..."
+              }
+            },
+            "required": [
+              "payer_name",
+              "payee_name",
+              "on_behalf_of"
+            ],
+            "additionalProperties": false,
+            "description": "Who owed and who was paid, as printed. Null where the document does not say."
+          }
+        },
+        "required": [
+          "pages",
+          "doc_kind",
+          "other_kind",
+          "title_suggestion",
+          "issuer",
+          "addressee",
+          "people_named",
+          "properties_or_addresses_referenced",
+          "account_numbers",
+          "case_or_reference_numbers",
+          "doc_date",
+          "dates",
+          "amounts",
+          "running_balance",
+          "meter_or_usage_readings",
+          "pagination_evidence",
+          "is_complete_document",
+          "missing_content_evidence",
+          "duplicate_indicators",
+          "handwriting",
+          "legibility_issues",
+          "summary",
+          "suggested_tags",
+          "extraction_confidence",
+          "confidence_notes",
+          "line_items",
+          "payment_instruments",
+          "account_holder_names",
+          "transaction_parties"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "unassigned_pages": {
+      "type": "array",
+      "description": "Pages that belong to no document above. Blank pages, illegible pages, stray photos. Every PDF page must be here or in exactly one documents[].pages.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "page",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "cross_document_observations": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Relationships you noticed across documents in this PDF: same account appearing in several, statements forming a date sequence with gaps, one document referencing another, possible duplicates."
+    }
+  },
+  "required": [
+    "file_kind",
+    "page_count_seen",
+    "documents",
+    "unassigned_pages",
+    "cross_document_observations"
+  ],
+  "additionalProperties": false
+}

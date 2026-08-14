@@ -1,0 +1,35 @@
+# ---- data: 7.5 GB, never in git ----
+recut/
+genius scan v2 from google drive/
+ocr-mistral/
+splits/
+pages/
+raw/
+archive/
+align-cache/
+embedded/
+embedded-test/
+ocr-smoke/
+out/
+ocr/
+
+# large derived artifacts
+recut-manifest.json
+supermemory-backlog.json
+
+# GitHub hard-rejects >100MB; the Farmers policy alone is 118MB
+*.pdf
+*.jpg
+*.jpeg
+*.png
+*.tif
+*.tiff
+
+# secrets
+.env
+*.env
+!.env.example
+
+__pycache__/
+*.pyc
+.venv/

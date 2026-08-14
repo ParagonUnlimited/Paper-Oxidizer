@@ -1,0 +1,73 @@
+{
+  "type": "object",
+  "description": "Classification of one image region extracted from a scanned financial/legal document. Transcribe, identify, and never guess -- 'illegible' is a valid answer, an invented one is not.",
+  "properties": {
+    "image_kind": {
+      "type": "string",
+      "enum": [
+        "logo",
+        "letterhead",
+        "seal",
+        "signature",
+        "handwriting",
+        "stamp",
+        "photo",
+        "chart_or_graph",
+        "table_image",
+        "barcode_or_qr",
+        "check_image",
+        "form_field_region",
+        "map",
+        "advertisement",
+        "other"
+      ],
+      "description": "What this image region is."
+    },
+    "description": {
+      "type": "string",
+      "description": "One sentence: what is visibly in this region."
+    },
+    "text_in_image": {
+      "type": "string",
+      "description": "Every legible word in the region, verbatim -- including text inside logos, stamps, and handwritten marks. 'illegible' where unreadable."
+    },
+    "organization_identified": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "When a logo, letterhead, or seal identifies an organization: its name. This often identifies the document's issuer more reliably than body text."
+    },
+    "date_visible": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Any date inside the region (stamp dates especially), YYYY-MM-DD or verbatim."
+    },
+    "signature_details": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "For signatures: printed name beneath it if any, title, and whether the signature line is signed or blank."
+    },
+    "relevance": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What this region tells us about the document: 'IRS eagle seal -- confirms federal issuer', 'RECEIVED stamp dated 2022-11-03 -- proves delivery date', 'signed by escrow officer'."
+    }
+  },
+  "required": [
+    "image_kind",
+    "description",
+    "text_in_image",
+    "organization_identified",
+    "date_visible",
+    "signature_details",
+    "relevance"
+  ],
+  "additionalProperties": false
+}

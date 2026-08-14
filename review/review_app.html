@@ -1,0 +1,373 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Document split — review</title>
+<style>
+:root{
+  --bg:#fbfaf8; --panel:#fff; --ink:#1c1b19; --muted:#6b6862; --line:#e2ded7;
+  --accent:#8a5a2b; --accent-soft:#f3e9dd; --warn:#a3421f; --ok:#3f6b3f;
+  --shadow:0 1px 3px rgba(0,0,0,.07);
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#161513;--panel:#1f1e1b;--ink:#eae7e1;--muted:#9b968d;--line:#33312d;
+        --accent:#d29a5e;--accent-soft:#2c2620;--warn:#e08661;--ok:#8fbf8f;
+        --shadow:0 1px 3px rgba(0,0,0,.4);}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+     font:15px/1.5 ui-sans-serif,system-ui,"Segoe UI",sans-serif}
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+       padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);
+       position:sticky;top:0;z-index:20;box-shadow:var(--shadow)}
+h1{font-size:15px;margin:0;font-weight:650;letter-spacing:-.01em}
+.tabs{display:flex;gap:2px;background:var(--bg);padding:2px;border-radius:8px}
+.tabs button{border:0;background:none;color:var(--muted);padding:5px 12px;
+             border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+.tabs button.on{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:var(--shadow)}
+.grow{flex:1}
+.pill{font-size:12px;color:var(--muted);white-space:nowrap}
+.pill b{color:var(--ink)}
+input[type=search],select,textarea,button.btn{
+  font:inherit;color:var(--ink);background:var(--panel);
+  border:1px solid var(--line);border-radius:7px;padding:5px 9px}
+input[type=search]{min-width:180px}
+button.btn{cursor:pointer}
+button.btn:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+button.primary:hover{filter:brightness(1.08)}
+main{padding:14px 16px 60px}
+
+/* ---------- filters ---------- */
+.filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.chip{border:1px solid var(--line);background:var(--panel);color:var(--muted);
+      border-radius:999px;padding:4px 11px;font-size:12.5px;cursor:pointer}
+.chip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--ink);font-weight:600}
+
+/* ---------- list ---------- */
+.row{display:grid;grid-template-columns:26px 118px 1fr 150px 92px 96px;gap:10px;
+     align-items:baseline;padding:8px 10px;border-bottom:1px solid var(--line);
+     cursor:pointer;font-size:13.5px}
+.row:hover{background:var(--accent-soft)}
+.row .nm{font-weight:550;overflow-wrap:anywhere}
+.row .sub{color:var(--muted);font-size:12px}
+.why{font-size:11px;font-weight:700;letter-spacing:.03em;color:var(--warn);
+     text-transform:uppercase;overflow-wrap:anywhere}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--line);display:inline-block}
+.dot.set{background:var(--ok)}
+.dec{font-size:12px;font-weight:650;color:var(--ok);overflow-wrap:anywhere}
+
+/* ---------- table ---------- */
+table{border-collapse:collapse;width:100%;font-size:12.5px;table-layout:fixed}
+th{position:sticky;top:52px;background:var(--panel);text-align:left;
+   border-bottom:2px solid var(--line);padding:7px 8px;font-size:11px;
+   text-transform:uppercase;letter-spacing:.04em;color:var(--muted);z-index:5}
+td{border-bottom:1px solid var(--line);padding:7px 8px;vertical-align:top;
+   white-space:pre-wrap;overflow-wrap:anywhere}
+tr:hover td{background:var(--accent-soft)}
+.tablewrap{overflow-x:auto}
+
+/* ---------- focus ---------- */
+.focus{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,.65fr);
+       gap:16px;align-items:start}
+@media (max-width:1000px){.focus{grid-template-columns:1fr}}
+.pane{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+      box-shadow:var(--shadow);overflow:hidden}
+.pane header{position:static;box-shadow:none;padding:8px 12px;font-size:13px}
+iframe{width:100%;height:calc(100vh - 210px);min-height:420px;border:0;display:block;background:#fff}
+.ocr{height:calc(100vh - 210px);min-height:420px;overflow:auto;padding:12px 14px;
+     font:12.5px/1.6 ui-monospace,"Cascadia Mono",Consolas,monospace;
+     white-space:pre-wrap;overflow-wrap:anywhere}
+.ocrpage+.ocrpage{margin-top:18px}
+.ocrhead{font:11px ui-sans-serif,system-ui,sans-serif;text-transform:uppercase;
+         letter-spacing:.05em;color:var(--muted);border-bottom:1px solid var(--line);
+         padding-bottom:4px;margin-bottom:8px}
+.banner{background:var(--accent-soft);border:1px solid var(--line);border-radius:8px;
+        padding:7px 11px;font-size:12.5px;color:var(--ink);margin-bottom:12px}
+.banner b{font-weight:650}
+.meta{padding:12px 14px}
+.meta dl{display:grid;grid-template-columns:104px 1fr;gap:5px 10px;margin:0 0 12px}
+.meta dt{color:var(--muted);font-size:12px}
+.meta dd{margin:0;font-size:13px;overflow-wrap:anywhere}
+.note{background:var(--bg);border:1px solid var(--line);border-radius:8px;
+      padding:9px 11px;font-size:12.5px;line-height:1.55;margin-bottom:12px;
+      white-space:pre-wrap;overflow-wrap:anywhere}
+label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;
+      color:var(--muted);margin:0 0 4px}
+select,textarea{width:100%}
+textarea{min-height:78px;resize:vertical;line-height:1.5}
+.field{margin-bottom:12px}
+.nav{display:flex;gap:8px;align-items:center;padding:0 14px 14px}
+.status{font-size:12px;color:var(--muted);min-height:17px;padding:0 14px 10px}
+.status.err{color:var(--warn);font-weight:600}
+.status.ok{color:var(--ok)}
+kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);
+    border-radius:4px;padding:1px 4px;color:var(--muted)}
+.empty{color:var(--muted);padding:40px 0;text-align:center}
+a{color:var(--accent)}
+</style>
+
+<header>
+  <h1>Document split — review</h1>
+  <div class="tabs">
+    <button data-view="focus" class="on">Review one by one</button>
+    <button data-view="list">List</button>
+    <button data-view="table">Table</button>
+  </div>
+  <span class="grow"></span>
+  <span class="pill" id="counts"></span>
+</header>
+
+<main>
+  <div class="filters" id="filters"></div>
+  <div id="view"></div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let ROWS = [], view = "focus", cursor = 0;
+const F = { flagged:true, undecided:false, why:"", bucket:"", q:"" };
+
+const VOCAB_DOC = [
+  ["", "— no opinion yet —"],
+  ["ok", "ok — correct as it is"],
+  ["wrong-order", "wrong-order — right pages, wrong sequence"],
+  ["split", "split — this is really two or more documents"],
+  ["merge", "merge — belongs with another document"],
+  ["relabel", "relabel — grouping right, label/date/account wrong"],
+  ["ocr-bad", "ocr-bad — grouping fine, the read-out text is wrong"],
+  ["drop", "drop — this should not have been kept"],
+  ["?", "? — unsure, look at this again"],
+];
+const VOCAB_DROPPED = [
+  ["", "— no opinion yet —"],
+  ["ok", "ok — correctly dropped, nothing lost"],
+  ["restore", "restore — this was wrongly dropped, put it back"],
+  ["?", "? — unsure, look at this again"],
+];
+const isDropped = r => r.why === "DISCARDED" || r.why === "UNRESOLVED";
+
+function visible(){
+  return ROWS.filter(r =>
+    (!F.flagged   || r.review) &&
+    (!F.undecided || !r.decision) &&
+    (!F.why       || r.why === F.why) &&
+    (!F.bucket    || r.bucket === F.bucket) &&
+    (!F.q         || (r.file+" "+r.issuer+" "+r.account+" "+r.notes+" "+r.missing)
+                      .toLowerCase().includes(F.q)));
+}
+const title = r => r.file.replace(/^\d+__/, "").replace(/\.pdf$/i, "")
+                         .replace(/^_(discarded|unresolved)\//, "");
+
+/* ---------------------------------------------------------------- filters */
+function drawFilters(){
+  const whys = [...new Set(ROWS.filter(r=>r.review).map(r=>r.why))].sort();
+  const bks  = [...new Set(ROWS.map(r=>r.bucket).filter(Boolean))].sort();
+  const n = visible().length;
+  $("#filters").innerHTML =
+    `<button class="chip ${F.flagged?"on":""}" data-t="flagged">Flagged only</button>
+     <button class="chip ${F.undecided?"on":""}" data-t="undecided">Not yet decided</button>
+     <select id="fw" title="Show only rows flagged for one particular reason"
+       ><option value="">Flagged for: any reason</option>${
+        whys.map(w=>`<option value="${w}" ${F.why===w?"selected":""}>Flagged for: ${w}</option>`).join("")}</select>
+     <select id="fb" title="Show only one issuer's paperwork"
+       ><option value="">Issuer: all</option>${
+        bks.map(b=>`<option value="${b}" ${F.bucket===b?"selected":""}>Issuer: ${b}</option>`).join("")}</select>
+     <input type="search" id="fq" placeholder="search issuer, notes, file…" value="${F.q}">
+     <span class="pill">${n} row${n===1?"":"s"} shown</span>`;
+  // Spell out what is on screen vs what exists. "134 rows shown" was not enough
+  // -- 581 rows minus a default filter is not a sum anyone should have to do.
+  const hidden = ROWS.length - ROWS.filter(r=>r.review).length;
+  $("#bnr")?.remove();                       // drawFilters runs on every redraw
+  $("#filters").insertAdjacentHTML("afterend", `<div class="banner" id="bnr">${
+    F.flagged
+      ? `Showing the <b>${ROWS.filter(r=>r.review).length} flagged</b> rows that need a
+         decision. <b>${hidden} clean documents are hidden</b> — they grouped cleanly, in
+         order, with no missing pages. Turn off <b>Flagged only</b> to browse them.`
+      : `Showing <b>all ${ROWS.length}</b> rows: 512 assembled documents, 65 dropped
+         pages, 4 unplaceable pages. Only <b>${ROWS.filter(r=>r.review).length}</b> of
+         them actually need a decision.`}</div>`);
+  $("#filters").querySelectorAll(".chip").forEach(b =>
+    b.onclick = () => { F[b.dataset.t] = !F[b.dataset.t]; cursor = 0; draw(); });
+  $("#fw").onchange = e => { F.why = e.target.value; cursor = 0; draw(); };
+  $("#fb").onchange = e => { F.bucket = e.target.value; cursor = 0; draw(); };
+  $("#fq").oninput  = e => { F.q = e.target.value.toLowerCase(); cursor = 0;
+                             draw(); $("#fq").focus(); };
+}
+function drawCounts(){
+  const d = ROWS.filter(r=>r.decision).length, f = ROWS.filter(r=>r.review).length;
+  $("#counts").innerHTML = `<b>${d}</b> decided · <b>${f}</b> flagged · <b>${ROWS.length}</b> total`;
+}
+
+/* ------------------------------------------------------------------- list */
+function drawList(){
+  const rows = visible();
+  if(!rows.length) return $("#view").innerHTML = `<p class="empty">Nothing matches those filters.</p>`;
+  $("#view").innerHTML = rows.map((r,i)=>`
+    <div class="row" data-i="${i}">
+      <span class="dot ${r.decision?"set":""}"></span>
+      <span class="why">${r.why||"—"}</span>
+      <span><span class="nm">${title(r)}</span><br><span class="sub">${
+        [r.issuer, r.account].filter(Boolean).join(" · ")||"&nbsp;"}</span></span>
+      <span class="sub">${r.bucket}</span>
+      <span class="sub">${r.date}</span>
+      <span class="dec">${r.decision||""}</span>
+    </div>`).join("");
+  $("#view").querySelectorAll(".row").forEach(el => el.onclick = () => {
+    cursor = +el.dataset.i; setView("focus"); });
+}
+
+/* ------------------------------------------------------------------ table */
+const COLS = [["decision","Decision",90],["correction","Correction",180],
+  ["why","Why",110],["file","File",250],["issuer","Issuer",160],["account","Account",130],
+  ["date","Date",90],["kind","Kind",110],["pages","Pp",44],["sourcePages","Source pages",150],
+  ["orderEvidence","Order evidence",180],["bucket","Account group",120],
+  ["missing","Missing",180],["notes","Notes",320]];
+function drawTable(){
+  const rows = visible();
+  $("#view").innerHTML = `<div class="tablewrap"><table>
+    <colgroup>${COLS.map(c=>`<col style="width:${c[2]}px">`).join("")}</colgroup>
+    <thead><tr>${COLS.map(c=>`<th>${c[1]}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((r,i)=>`<tr data-i="${i}">${
+      COLS.map(c=>`<td>${String(r[c[0]]??"").replace(/</g,"&lt;")}</td>`).join("")
+    }</tr>`).join("")}</tbody></table></div>`;
+  $("#view").querySelectorAll("tr[data-i]").forEach(el => el.onclick = () => {
+    cursor = +el.dataset.i; setView("focus"); });
+}
+
+/* ------------------------------------------------------------------ focus */
+let pdfTab = "self";
+function drawFocus(){
+  const rows = visible();
+  if(!rows.length) return $("#view").innerHTML = `<p class="empty">Nothing matches those filters.</p>`;
+  cursor = Math.max(0, Math.min(cursor, rows.length-1));
+  const r = rows[cursor];
+  localStorage.setItem("cursor", r.file);          // survive a refresh
+  const vocab = isDropped(r) ? VOCAB_DROPPED : VOCAB_DOC;
+  const src = pdfTab === "compare" && r.compare ? r.compare : r.open;
+  const tabs = `<div class="tabs">
+      <button data-p="self" class="${pdfTab==="self"?"on":""}">Scan</button>
+      ${r.compare ? `<button data-p="compare" class="${pdfTab==="compare"?"on":""}"
+         >Kept copy (${r.comparePage})</button>` : ""}
+      <button data-p="ocr" class="${pdfTab==="ocr"?"on":""}">Text layer (OCR)</button></div>`;
+
+  const pane = pdfTab === "ocr"
+    ? `<div id="ocrbox" class="ocr">reading the text layer…</div>`
+    : `<iframe src="${encodeURI(src)}#zoom=page-width" title="document"></iframe>`;
+
+  $("#view").innerHTML = `<div class="focus">
+    <div class="pane">
+      <header>${tabs}<span class="grow"></span>
+        <a href="${encodeURI(src)}" target="_blank" class="pill">open in a new tab ↗</a></header>
+      ${pane}
+    </div>
+    <div class="pane">
+      <div class="meta">
+        <div class="why" style="margin-bottom:8px">${r.why || "no issue flagged"}</div>
+        <div style="font-weight:650;margin-bottom:10px;overflow-wrap:anywhere">${title(r)}</div>
+        <dl>
+          <dt>Issuer</dt><dd>${r.issuer||"—"}</dd>
+          <dt>Account</dt><dd>${r.account||"—"}</dd>
+          <dt>Date</dt><dd>${r.date||"—"}</dd>
+          <dt>Kind</dt><dd>${r.kind||"—"}</dd>
+          <dt>Pages</dt><dd>${r.pages} &nbsp;<span class="sub">(${r.sourcePages})</span></dd>
+          ${r.orderEvidence?`<dt>Order from</dt><dd>${r.orderEvidence}</dd>`:""}
+          ${r.missing?`<dt>Missing</dt><dd>${r.missing}</dd>`:""}
+        </dl>
+        ${r.notes?`<div class="note">${r.notes}</div>`:""}
+        <div class="field"><label for="dec">Your decision</label>
+          <select id="dec">${vocab.map(([v,t])=>
+            `<option value="${v}" ${r.decision===v?"selected":""}>${t}</option>`).join("")}
+          </select></div>
+        <div class="field"><label for="cor">Notes / correction</label>
+          <textarea id="cor" placeholder="Only if the decision needs explaining — the right order, where to cut, the correct account…">${
+            (r.correction||"").replace(/</g,"&lt;")}</textarea></div>
+      </div>
+      <div class="status" id="stat"></div>
+      <div class="nav">
+        <button class="btn" id="prev">← Back</button>
+        <button class="btn primary" id="next">Save &amp; next →</button>
+        <span class="grow"></span>
+        <span class="pill">${cursor+1} of ${rows.length}</span>
+      </div>
+      <div class="status"><kbd>←</kbd> <kbd>→</kbd> move · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> save &amp; next</div>
+    </div></div>`;
+
+  $("#view").querySelectorAll("[data-p]").forEach(b =>
+    b.onclick = () => { pdfTab = b.dataset.p; drawFocus(); });
+  if(pdfTab === "ocr") loadText(r);
+  $("#dec").onchange = () => save(r, false);
+  $("#cor").onblur   = () => save(r, false);
+  $("#prev").onclick = () => { save(r,false).then(()=>{ cursor--; pdfTab="self"; draw(); }); };
+  $("#next").onclick = () => { save(r,true); };
+}
+
+/* --------------------------------------------------------------- ocr pane */
+// This is the invisible layer inside the PDF -- the corrected vision reading
+// that build.py embedded. It is what a search index will actually see, so it
+// is worth eyeballing against the scan next to it.
+async function loadText(r){
+  const box = $("#ocrbox"); if(!box) return;
+  try{
+    const d = await (await fetch("/text?file=" + encodeURIComponent(r.open))).json();
+    if(d.error) { box.textContent = d.error; return; }
+    box.innerHTML = d.pages.map((t,i)=>
+      `<div class="ocrpage"><div class="ocrhead">page ${i+1} of ${d.pages.length}
+         · ${t.length} characters${t.length ? "" : "  ⚠ NO TEXT ON THIS PAGE"}</div>${
+         (t||"(this page carries no text layer at all)").replace(/</g,"&lt;")}</div>`).join("");
+  }catch(e){ box.textContent = "could not read the text layer: " + e.message; }
+}
+
+/* ------------------------------------------------------------------- save */
+async function save(r, advance){
+  const dec = $("#dec")?.value ?? r.decision;
+  const cor = $("#cor")?.value ?? r.correction;
+  const stat = $("#stat");
+  if(dec === r.decision && cor === r.correction){
+    if(advance){ cursor++; pdfTab="self"; draw(); }
+    return;
+  }
+  stat.className = "status"; stat.textContent = "saving…";
+  try{
+    const res = await fetch("/save", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({file:r.file, decision:dec, correction:cor})});
+    if(!res.ok){
+      const e = await res.json().catch(()=>({error:"HTTP "+res.status}));
+      stat.className = "status err";
+      stat.innerHTML = e.error + ' <button class="btn" onclick="location.reload()">Retry</button>';
+      return;                                   // do NOT advance past an unsaved row
+    }
+    r.decision = dec; r.correction = cor;
+    stat.className = "status ok"; stat.textContent = "saved to the spreadsheet";
+    drawCounts();
+    if(advance){ cursor++; pdfTab="self"; draw(); }
+  }catch(err){
+    stat.className = "status err";
+    stat.textContent = "could not reach the app — is the window still running? (" + err.message + ")";
+  }
+}
+
+/* ------------------------------------------------------------------ shell */
+function draw(){ drawFilters(); drawCounts();
+  ({focus:drawFocus, list:drawList, table:drawTable})[view](); }
+function setView(v){ view = v;
+  document.querySelectorAll(".tabs [data-view]").forEach(b =>
+    b.classList.toggle("on", b.dataset.view === v));
+  draw(); }
+document.querySelectorAll(".tabs [data-view]").forEach(b =>
+  b.onclick = () => setView(b.dataset.view));
+
+addEventListener("keydown", e => {
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+  if(view !== "focus") return;
+  if(e.key === "ArrowRight" && !typing){ cursor++; pdfTab="self"; draw(); }
+  if(e.key === "ArrowLeft"  && !typing){ cursor--; pdfTab="self"; draw(); }
+  if(e.key === "Enter" && (e.ctrlKey||e.metaKey)) $("#next")?.click();
+});
+
+fetch("/data").then(r=>r.json()).then(d => {
+  ROWS = d;
+  const last = localStorage.getItem("cursor");   // land back where you left off
+  if(last){ const i = visible().findIndex(r => r.file === last); if(i >= 0) cursor = i; }
+  draw();
+});
+</script>

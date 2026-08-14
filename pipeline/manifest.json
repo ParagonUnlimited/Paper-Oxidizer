@@ -1,0 +1,44 @@
+[
+ {
+  "id": "013",
+  "file": "013-san-jose-water-24pp.pdf",
+  "pages": 24,
+  "images_mb": 6.4
+ },
+ {
+  "id": "014",
+  "file": "014-santa-clara-dtac-80pp.pdf",
+  "pages": 80,
+  "images_mb": 19.2
+ },
+ {
+  "id": "015",
+  "file": "015-we-oneil-35pp.pdf",
+  "pages": 35,
+  "images_mb": 6.2
+ },
+ {
+  "id": "017",
+  "file": "017-pacific-power-198pp.pdf",
+  "pages": 198,
+  "images_mb": 58.3
+ },
+ {
+  "id": "018",
+  "file": "018-stcu-411pp.pdf",
+  "pages": 411,
+  "images_mb": 108.9
+ },
+ {
+  "id": "077",
+  "file": "077-greenwaste-20pp.pdf",
+  "pages": 20,
+  "images_mb": 38.5
+ },
+ {
+  "id": "078",
+  "file": "078-unlabelled-23pp.pdf",
+  "pages": 23,
+  "images_mb": 22.6
+ }
+]

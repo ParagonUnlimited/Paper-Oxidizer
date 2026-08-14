@@ -1,0 +1,32 @@
+[
+  {
+    "document": "0000__San Jose Water bill 8364120000-7 2021-06-25",
+    "pages": 1,
+    "blocks_placed": 56,
+    "min_word_confidence": 0.7053841278829254
+  },
+  {
+    "document": "0001__FTB Notice of Proposed Assessment (NPA) TY2022",
+    "pages": 1,
+    "blocks_placed": 40,
+    "min_word_confidence": 0.6513545687820411
+  },
+  {
+    "document": "0002__FTB Balance Due Notice TY2022 acct 211-24409-70",
+    "pages": 1,
+    "blocks_placed": 35,
+    "min_word_confidence": 0.6224587362511056
+  },
+  {
+    "document": "0003__FTB Notice of Proposed Assessment (NPA) TY2021",
+    "pages": 1,
+    "blocks_placed": 40,
+    "min_word_confidence": 0.5621759999439189
+  },
+  {
+    "document": "0004__Klamath County delinquencyforeclosure warning notice ~2024-25, account",
+    "pages": 1,
+    "blocks_placed": 36,
+    "min_word_confidence": 0.10176776897525502
+  }
+]

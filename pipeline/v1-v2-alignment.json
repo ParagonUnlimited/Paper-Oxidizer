@@ -1,0 +1,1095 @@
+{
+  "grid": 64,
+  "gates": {
+    "A_identity": {
+      "018-stcu-411pp.pdf": {
+        "v2_file": "2026-05-11 17-28.pdf",
+        "pages": 411,
+        "identity_score_min": 0.5185,
+        "identity_score_mean": 0.8568,
+        "best_match_is_identity": 404,
+        "pages_where_another_page_scored_higher": 7,
+        "margin_min": -0.0496,
+        "worst_pages": [
+          124,
+          321,
+          250,
+          271,
+          231
+        ],
+        "pages_decided_by_image_fallback": 0
+      },
+      "017-pacific-power-198pp.pdf": {
+        "v2_file": "2026-05-10 23-18.pdf",
+        "pages": 198,
+        "identity_score_min": 0.7308,
+        "identity_score_mean": 0.8924,
+        "best_match_is_identity": 193,
+        "pages_where_another_page_scored_higher": 5,
+        "margin_min": -0.0296,
+        "worst_pages": [
+          163,
+          85,
+          16,
+          179,
+          172
+        ],
+        "pages_decided_by_image_fallback": 1
+      },
+      "014-santa-clara-dtac-80pp.pdf": {
+        "v2_file": "2026-05-09 22-46.pdf",
+        "pages": 80,
+        "identity_score_min": 0.0303,
+        "identity_score_mean": 0.7203,
+        "best_match_is_identity": 76,
+        "pages_where_another_page_scored_higher": 4,
+        "margin_min": -0.3338,
+        "worst_pages": [
+          48,
+          10,
+          30,
+          50,
+          63
+        ],
+        "pages_decided_by_image_fallback": 2
+      },
+      "015-we-oneil-35pp.pdf": {
+        "v2_file": "2026-05-09 23-16.pdf",
+        "pages": 35,
+        "identity_score_min": 0.4858,
+        "identity_score_mean": 0.8547,
+        "best_match_is_identity": 30,
+        "pages_where_another_page_scored_higher": 5,
+        "margin_min": -0.0198,
+        "worst_pages": [
+          20,
+          32,
+          18,
+          9,
+          31
+        ],
+        "pages_decided_by_image_fallback": 0
+      }
+    },
+    "B_013_deletions": {
+      "v1_file": "013-san-jose-water-24pp.pdf",
+      "v2_file": "2026-05-09 20-00.pdf",
+      "v1_pages": 24,
+      "v2_pages": 22,
+      "deletions_required": 2,
+      "deletions_expected": 2,
+      "deleted_v1_pages": [
+        23,
+        24
+      ],
+      "map_v1_to_v2": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6,
+        "7": 7,
+        "8": 8,
+        "9": 9,
+        "10": 10,
+        "11": 11,
+        "12": 12,
+        "13": 13,
+        "14": 14,
+        "15": 15,
+        "16": 16,
+        "17": 17,
+        "18": 18,
+        "19": 19,
+        "20": 20,
+        "21": 21,
+        "22": 22
+      },
+      "score_min": 0.2515,
+      "score_mean": 0.7402,
+      "pass": false
+    },
+    "C_hunt": {
+      "077-greenwaste-20pp.pdf": {
+        "pages": 20,
+        "found": 14,
+        "not_found": 6,
+        "rows": [
+          {
+            "v1_page": 1,
+            "top": [
+              {
+                "file": "2026-05-09 23-16.pdf",
+                "page": 34,
+                "score": 0.8098
+              },
+              {
+                "file": "2026-05-09 23-16.pdf",
+                "page": 35,
+                "score": 0.7914
+              },
+              {
+                "file": "2026-05-09 23-16.pdf",
+                "page": 33,
+                "score": 0.7892
+              }
+            ],
+            "margin": 0.0184,
+            "found": true
+          },
+          {
+            "v1_page": 2,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 2,
+                "score": 0.8593
+              },
+              {
+                "file": "2026-05-31 21-13.pdf",
+                "page": 1,
+                "score": 0.8235
+              },
+              {
+                "file": "2026-05-09 23-16.pdf",
+                "page": 34,
+                "score": 0.5856
+              }
+            ],
+            "margin": 0.0358,
+            "found": true
+          },
+          {
+            "v1_page": 3,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 3,
+                "score": 0.7299
+              },
+              {
+                "file": "2026-05-09 23-16.pdf",
+                "page": 34,
+                "score": 0.5882
+              },
+              {
+                "file": "2026-05-09 23-16.pdf",
+                "page": 33,
+                "score": 0.5792
+              }
+            ],
+            "margin": 0.1417,
+            "found": true
+          },
+          {
+            "v1_page": 4,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 4,
+                "score": 0.8392
+              },
+              {
+                "file": "2026-05-09 23-16.pdf",
+                "page": 34,
+                "score": 0.6411
+              },
+              {
+                "file": "2026-05-09 23-16.pdf",
+                "page": 33,
+                "score": 0.6161
+              }
+            ],
+            "margin": 0.1981,
+            "found": true
+          },
+          {
+            "v1_page": 5,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 5,
+                "score": 0.9346
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 7,
+                "score": 0.6901
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 6,
+                "score": 0.6071
+              }
+            ],
+            "margin": 0.2445,
+            "found": true
+          },
+          {
+            "v1_page": 6,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 6,
+                "score": 0.7078
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 13,
+                "score": 0.6697
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 9,
+                "score": 0.6667
+              }
+            ],
+            "margin": 0.0381,
+            "found": true
+          },
+          {
+            "v1_page": 7,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 7,
+                "score": 0.6727
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 5,
+                "score": 0.5101
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 9,
+                "score": 0.3858
+              }
+            ],
+            "margin": 0.1626,
+            "found": true
+          },
+          {
+            "v1_page": 8,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 8,
+                "score": 0.6576
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 12,
+                "score": 0.4762
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 13,
+                "score": 0.4756
+              }
+            ],
+            "margin": 0.1814,
+            "found": true
+          },
+          {
+            "v1_page": 9,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 9,
+                "score": 0.5767
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 6,
+                "score": 0.5275
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 13,
+                "score": 0.5185
+              }
+            ],
+            "margin": 0.0492,
+            "found": true
+          },
+          {
+            "v1_page": 10,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 10,
+                "score": 0.5286
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 9,
+                "score": 0.4796
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 6,
+                "score": 0.4725
+              }
+            ],
+            "margin": 0.049,
+            "found": false
+          },
+          {
+            "v1_page": 11,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 11,
+                "score": 0.4952
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 10,
+                "score": 0.4791
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 6,
+                "score": 0.4791
+              }
+            ],
+            "margin": 0.0161,
+            "found": false
+          },
+          {
+            "v1_page": 12,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 12,
+                "score": 0.5674
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 13,
+                "score": 0.5545
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 14,
+                "score": 0.5113
+              }
+            ],
+            "margin": 0.0129,
+            "found": true
+          },
+          {
+            "v1_page": 13,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 13,
+                "score": 0.5749
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 12,
+                "score": 0.5438
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 14,
+                "score": 0.516
+              }
+            ],
+            "margin": 0.0311,
+            "found": true
+          },
+          {
+            "v1_page": 14,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 13,
+                "score": 0.5519
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 14,
+                "score": 0.5438
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 12,
+                "score": 0.5364
+              }
+            ],
+            "margin": 0.0081,
+            "found": true
+          },
+          {
+            "v1_page": 15,
+            "top": [
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 15,
+                "score": 0.8092
+              },
+              {
+                "file": "2026-08-01 15-01.pdf",
+                "page": 1,
+                "score": 0.8031
+              },
+              {
+                "file": "2026-05-10 23-18.pdf",
+                "page": 27,
+                "score": 0.7719
+              }
+            ],
+            "margin": 0.0061,
+            "found": true
+          },
+          {
+            "v1_page": 16,
+            "top": [
+              {
+                "file": "2026-08-10 17-40.pdf",
+                "page": 1,
+                "score": 0.8467
+              },
+              {
+                "file": "2026-08-11 14-56.pdf",
+                "page": 1,
+                "score": 0.8262
+              },
+              {
+                "file": "2026-05-10 23-18.pdf",
+                "page": 10,
+                "score": 0.6637
+              }
+            ],
+            "margin": 0.0205,
+            "found": true
+          },
+          {
+            "v1_page": 17,
+            "top": [
+              {
+                "file": "2026-08-10 17-40.pdf",
+                "page": 1,
+                "score": 0.1214
+              },
+              {
+                "file": "2026-08-11 14-56.pdf",
+                "page": 1,
+                "score": 0.1167
+              },
+              {
+                "file": "2026-05-10 23-18.pdf",
+                "page": 53,
+                "score": 0.1111
+              }
+            ],
+            "margin": 0.0047,
+            "found": false
+          },
+          {
+            "v1_page": 18,
+            "top": [
+              {
+                "file": "2026-08-10 17-40.pdf",
+                "page": 1,
+                "score": 0.1628
+              },
+              {
+                "file": "2026-08-11 14-56.pdf",
+                "page": 1,
+                "score": 0.1574
+              },
+              {
+                "file": "2026-05-10 23-18.pdf",
+                "page": 53,
+                "score": 0.136
+              }
+            ],
+            "margin": 0.0054,
+            "found": false
+          },
+          {
+            "v1_page": 19,
+            "top": [
+              {
+                "file": "2026-05-10 23-18.pdf",
+                "page": 178,
+                "score": 0.0482
+              },
+              {
+                "file": "2026-05-10 23-18.pdf",
+                "page": 174,
+                "score": 0.0465
+              },
+              {
+                "file": "2026-05-10 23-18.pdf",
+                "page": 175,
+                "score": 0.0465
+              }
+            ],
+            "margin": 0.0017,
+            "found": false
+          },
+          {
+            "v1_page": 20,
+            "top": [
+              {
+                "file": "2026-08-01 17-09.pdf",
+                "page": 2,
+                "score": 0.0714
+              },
+              {
+                "file": "2026-05-11 17-28.pdf",
+                "page": 5,
+                "score": 0.0714
+              },
+              {
+                "file": "2026-08-01 17-10.pdf",
+                "page": 2,
+                "score": 0.061
+              }
+            ],
+            "margin": 0.0,
+            "found": false
+          }
+        ]
+      },
+      "078-unlabelled-23pp.pdf": {
+        "pages": 23,
+        "found": 18,
+        "not_found": 5,
+        "rows": [
+          {
+            "v1_page": 1,
+            "top": [
+              {
+                "file": "2026-08-11 09-08.pdf",
+                "page": 1,
+                "score": 0.7635
+              },
+              {
+                "file": "2026-05-31 21-56.pdf",
+                "page": 1,
+                "score": 0.6497
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 5,
+                "score": 0.5668
+              }
+            ],
+            "margin": 0.1138,
+            "found": true
+          },
+          {
+            "v1_page": 2,
+            "top": [
+              {
+                "file": "2026-08-11 09-08.pdf",
+                "page": 2,
+                "score": 0.7285
+              },
+              {
+                "file": "2026-05-31 21-56.pdf",
+                "page": 2,
+                "score": 0.6555
+              },
+              {
+                "file": "2026-05-31 21-35.pdf",
+                "page": 3,
+                "score": 0.6544
+              }
+            ],
+            "margin": 0.073,
+            "found": true
+          },
+          {
+            "v1_page": 3,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 1,
+                "score": 0.5379
+              },
+              {
+                "file": "2026-05-31 21-56.pdf",
+                "page": 3,
+                "score": 0.4482
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 5,
+                "score": 0.4012
+              }
+            ],
+            "margin": 0.0897,
+            "found": false
+          },
+          {
+            "v1_page": 4,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 2,
+                "score": 0.6667
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 8,
+                "score": 0.3273
+              },
+              {
+                "file": "2026-05-31 21-56.pdf",
+                "page": 4,
+                "score": 0.3251
+              }
+            ],
+            "margin": 0.3394,
+            "found": true
+          },
+          {
+            "v1_page": 5,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 3,
+                "score": 0.534
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 5,
+                "score": 0.4693
+              },
+              {
+                "file": "2026-05-31 21-56.pdf",
+                "page": 3,
+                "score": 0.4224
+              }
+            ],
+            "margin": 0.0647,
+            "found": false
+          },
+          {
+            "v1_page": 6,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 4,
+                "score": 0.5359
+              },
+              {
+                "file": "2026-05-31 21-56.pdf",
+                "page": 4,
+                "score": 0.3641
+              },
+              {
+                "file": "2026-05-31 21-35.pdf",
+                "page": 5,
+                "score": 0.3636
+              }
+            ],
+            "margin": 0.1718,
+            "found": false
+          },
+          {
+            "v1_page": 7,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 5,
+                "score": 0.456
+              },
+              {
+                "file": "2026-08-11 09-08.pdf",
+                "page": 1,
+                "score": 0.3611
+              },
+              {
+                "file": "2026-05-31 21-35.pdf",
+                "page": 4,
+                "score": 0.3602
+              }
+            ],
+            "margin": 0.0949,
+            "found": false
+          },
+          {
+            "v1_page": 8,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 6,
+                "score": 0.5885
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 4,
+                "score": 0.3543
+              },
+              {
+                "file": "2026-05-31 21-56.pdf",
+                "page": 4,
+                "score": 0.3182
+              }
+            ],
+            "margin": 0.2342,
+            "found": true
+          },
+          {
+            "v1_page": 9,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 7,
+                "score": 0.4262
+              },
+              {
+                "file": "2026-05-31 21-56.pdf",
+                "page": 3,
+                "score": 0.4189
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 1,
+                "score": 0.4096
+              }
+            ],
+            "margin": 0.0073,
+            "found": false
+          },
+          {
+            "v1_page": 10,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 8,
+                "score": 0.6528
+              },
+              {
+                "file": "2026-05-31 21-56.pdf",
+                "page": 4,
+                "score": 0.3537
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 2,
+                "score": 0.3385
+              }
+            ],
+            "margin": 0.2991,
+            "found": true
+          },
+          {
+            "v1_page": 11,
+            "top": [
+              {
+                "file": "2026-08-01 15-02.pdf",
+                "page": 1,
+                "score": 0.8788
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 9,
+                "score": 0.8412
+              },
+              {
+                "file": "2026-05-31 21-35.pdf",
+                "page": 1,
+                "score": 0.6524
+              }
+            ],
+            "margin": 0.0376,
+            "found": true
+          },
+          {
+            "v1_page": 12,
+            "top": [
+              {
+                "file": "2026-05-09 20-00.pdf",
+                "page": 19,
+                "score": 0.8308
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 10,
+                "score": 0.806
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 12,
+                "score": 0.2959
+              }
+            ],
+            "margin": 0.0248,
+            "found": true
+          },
+          {
+            "v1_page": 13,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 11,
+                "score": 0.7251
+              },
+              {
+                "file": "2026-05-09 20-00.pdf",
+                "page": 20,
+                "score": 0.6866
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 12,
+                "score": 0.169
+              }
+            ],
+            "margin": 0.0385,
+            "found": true
+          },
+          {
+            "v1_page": 14,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 12,
+                "score": 0.9014
+              },
+              {
+                "file": "2026-05-09 20-00.pdf",
+                "page": 21,
+                "score": 0.863
+              },
+              {
+                "file": "2026-05-09 20-00.pdf",
+                "page": 19,
+                "score": 0.2828
+              }
+            ],
+            "margin": 0.0384,
+            "found": true
+          },
+          {
+            "v1_page": 15,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 13,
+                "score": 0.8519
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 14,
+                "score": 0.467
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 20,
+                "score": 0.4362
+              }
+            ],
+            "margin": 0.3849,
+            "found": true
+          },
+          {
+            "v1_page": 16,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 14,
+                "score": 0.9739
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 20,
+                "score": 0.6912
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 15,
+                "score": 0.6842
+              }
+            ],
+            "margin": 0.2827,
+            "found": true
+          },
+          {
+            "v1_page": 17,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 15,
+                "score": 0.8226
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 14,
+                "score": 0.6838
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 20,
+                "score": 0.6691
+              }
+            ],
+            "margin": 0.1388,
+            "found": true
+          },
+          {
+            "v1_page": 18,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 16,
+                "score": 0.9375
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 20,
+                "score": 0.6483
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 19,
+                "score": 0.625
+              }
+            ],
+            "margin": 0.2892,
+            "found": true
+          },
+          {
+            "v1_page": 19,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 17,
+                "score": 0.7358
+              },
+              {
+                "file": "2026-05-10 23-11.pdf",
+                "page": 5,
+                "score": 0.1882
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 19,
+                "score": 0.1778
+              }
+            ],
+            "margin": 0.5476,
+            "found": true
+          },
+          {
+            "v1_page": 20,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 18,
+                "score": 0.8849
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 19,
+                "score": 0.7917
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 20,
+                "score": 0.7483
+              }
+            ],
+            "margin": 0.0932,
+            "found": true
+          },
+          {
+            "v1_page": 21,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 19,
+                "score": 0.8667
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 18,
+                "score": 0.8286
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 20,
+                "score": 0.781
+              }
+            ],
+            "margin": 0.0381,
+            "found": true
+          },
+          {
+            "v1_page": 22,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 20,
+                "score": 0.896
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 18,
+                "score": 0.7535
+              },
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 19,
+                "score": 0.75
+              }
+            ],
+            "margin": 0.1425,
+            "found": true
+          },
+          {
+            "v1_page": 23,
+            "top": [
+              {
+                "file": "2026-05-31 21-58.pdf",
+                "page": 21,
+                "score": 0.8299
+              },
+              {
+                "file": "2026-06-01 01-36.pdf",
+                "page": 1,
+                "score": 0.796
+              },
+              {
+                "file": "2026-08-11 09-24.pdf",
+                "page": 1,
+                "score": 0.403
+              }
+            ],
+            "margin": 0.0339,
+            "found": true
+          }
+        ]
+      }
+    }
+  },
+  "calibration": {
+    "genuine_n": 724,
+    "genuine_min": 0.0303,
+    "genuine_p01": 0.4482,
+    "genuine_mean": 0.8514,
+    "impostor_n": 1133,
+    "impostor_max": 0.8537,
+    "impostor_p99": 0.6483,
+    "impostor_mean": 0.1395,
+    "threshold": 0.5482,
+    "distributions_separate": false
+  },
+  "contact_sheets": [
+    "C:\\Users\\busin\\Documents\\Document Splitting for Paperless\\alignment-sheets\\identity-weakest-018.png",
+    "C:\\Users\\busin\\Documents\\Document Splitting for Paperless\\alignment-sheets\\identity-weakest-017.png",
+    "C:\\Users\\busin\\Documents\\Document Splitting for Paperless\\alignment-sheets\\013-deleted-pages.png",
+    "C:\\Users\\busin\\Documents\\Document Splitting for Paperless\\alignment-sheets\\hunt-077.png",
+    "C:\\Users\\busin\\Documents\\Document Splitting for Paperless\\alignment-sheets\\hunt-078.png"
+  ]
+}

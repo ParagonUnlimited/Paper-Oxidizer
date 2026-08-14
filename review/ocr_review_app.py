@@ -1,0 +1,776 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["psycopg[binary]>=3.1", "pymupdf>=1.24"]
+# ///
+"""Review + correct the low-confidence Mistral OCR before it is embedded.
+
+    uv run ocr_review_app.py            # then open http://127.0.0.1:8778
+
+NEON IS THE SOURCE OF TRUTH. Every fact this app shows comes from the database:
+page text from ocr_reading.text, word confidences from ocr_reading.confidence,
+the document->pdf mapping from output_file. Nothing is read from ocr-mistral/.
+The single exception is the page IMAGE, because Neon stores no pixels -- those
+are rendered on demand from recut/<name>.pdf when a page is actually viewed.
+
+WHY WORD CONFIDENCE DRIVES EVERYTHING. The approved plan gated on MINIMUM word
+confidence at 0.90. Measured, that flags 1,330 of 1,464 documents (91%): every
+scan has one bad word (a smudge, a logo, a signature) and median doc-minimum is
+0.576, while mean AVERAGE page confidence is 0.9799. The statistic that actually
+separates good from bad is the PROPORTION of bad words:
+
+    359,189 words, 4,913 below 0.60 = 1.4% overall
+    667 documents (46%) have zero bad words
+    median 0.27%   p90 4.12%   p99 21.84%
+    gate at >2%  ->  245 documents   (>5% -> 117, >10% -> 48)
+
+The same word scores drive the highlighting: each carries a start_index, a
+character offset into the page markdown, so suspect words are marked at exact
+positions instead of by string matching -- which would mis-mark the second
+occurrence of a word that appears twice.
+
+CORRECTIONS ARE ADDITIVE. A save never mutates the Mistral rows; it writes a
+separate reading with method='human-corrected'. The Mistral text cost $8.88 and
+cannot be reproduced exactly, so it stays intact and any correction can be
+withdrawn by deleting one row. Re-saving a page deletes and re-inserts that
+page's correction in one transaction. ocr_reading has a UNIQUE constraint on
+(page_id, method), so the method carries the reviewer -- 'human-corrected:jeff'
+-- and the database itself enforces one correction per page per reviewer.
+"""
+import io, json, os, re, socketserver, sys, threading, webbrowser
+from http.server import SimpleHTTPRequestHandler
+from urllib.parse import parse_qs, unquote, urlparse
+
+import fitz
+import psycopg
+
+BASE = os.path.dirname(os.path.abspath(__file__))
+
+# Page images are the ONE thing Neon cannot serve -- it stores no pixels. The
+# 3.09 GB of scans live outside this repo, so the location is configurable
+# rather than assumed to sit beside the script. Set PAGE_SOURCE to wherever
+# recut/ actually is; the fallback keeps the original single-folder layout
+# working. When pages move to R2 this becomes the only thing that changes.
+RECUT = (os.environ.get("PAGE_SOURCE")
+         or os.path.join(BASE, "recut")
+         or "")
+if not os.path.isdir(RECUT):
+    alt = os.path.join(os.path.dirname(BASE), "recut")
+    if os.path.isdir(alt):
+        RECUT = alt
+PORT = 8778
+BAD_WORD = 0.60          # a word below this is "suspect"
+GATE = 2.0               # % of suspect words that puts a document in the queue
+MIN_WORDS = 20           # below this a percentage is noise, not a signal
+MAX_REPEAT = 4           # consecutive identical non-blank rows = a loop
+# No Genius Scan comparison: Mistral is decisively better, so the old reading
+# has no review value. The v2 pages never had one in Neon anyway (measured: 0 of
+# 1,762) -- all 2,327 legacy readings sit on v1-merged files.
+MISTRAL, HUMAN = "mistral-ocr-4-1", "human-corrected"
+RENDER_DPI = 200         # high enough that zooming in reveals more, not blur
+
+# WHO IS REVIEWING. Corrections are stored per reviewer -- meta.by -- so two
+# people working the same corpus never overwrite each other, and so a court
+# record can show who changed what. Set REVIEWER per deployment; the login
+# supplies it once this runs on the server.
+REVIEWER = (os.environ.get("REVIEWER") or "alden").strip().lower()
+
+# ocr_reading carries a UNIQUE constraint on (page_id, method) --
+# ocr_reading_page_id_method_key. A single shared 'human-corrected' method
+# therefore allows exactly ONE correction per page for everyone, and the second
+# reviewer's save dies on a constraint violation. Putting the reviewer in the
+# method turns that constraint into exactly the rule we want: one correction
+# per page PER REVIEWER, enforced by the database rather than by convention.
+MY_METHOD = "%s:%s" % (HUMAN, REVIEWER)
+
+URL = os.environ.get("NEON_DATABASE_URL")
+if not URL:
+    sys.exit("NEON_DATABASE_URL not set")
+
+
+def db():
+    return psycopg.connect(URL)
+
+
+def score(words):
+    return sum(1 for w in words if (w.get("confidence") or 1.0) < BAD_WORD), len(words)
+
+
+def page_words(conf):
+    return (conf or {}).get("word_confidence_scores") or []
+
+
+TR = re.compile(r"<tr>(.*?)</tr>", re.S)
+
+
+CELL = re.compile(r"<[^>]*>|&nbsp;|\s")
+
+
+def repetition(blocks):
+    """(longest consecutive run of one row, total duplicated rows).
+
+    A SECOND, INDEPENDENT FAILURE MODE. Word confidence asks "how sure is the
+    model about this word"; a repetition loop emits words it is entirely sure
+    of, over and over, when it gets stuck on a low-contrast region. The worst
+    case here repeats one row 35 times and scores 0.0% suspect -- invisible to
+    confidence, and it would write invented line items into a probate account.
+
+    TWO REFINEMENTS, both from real false positives:
+
+    1. BLANK ROWS ARE IGNORED. An invoice with printed ruled lines yields a
+       run of identical empty <tr> rows. Measured: 17 of 54 flagged documents
+       had NO repeated content at all -- only blank rows from the paper form.
+
+    2. CONSECUTIVE RUNS, not total occurrences. A receipt can legitimately
+       list the same item several times, scattered through the order; a
+       generation loop emits the same row back to back. Measured across the
+       corpus, run>=4 flags 10 documents and still catches every confirmed
+       loop (runs of 20, 12, 10, 10), where counting occurrences anywhere
+       flagged 54.
+    """
+    worst = dups = 0
+    for t in ((blocks or {}).get("tables") or []):
+        rows = [r for r in TR.findall(t.get("content") or "") if CELL.sub("", r)]
+        if not rows:
+            continue
+        run = 1
+        prev = None
+        counts = {}
+        for r in rows:
+            counts[r] = counts.get(r, 0) + 1
+            run = run + 1 if r == prev else 1
+            prev = r
+            worst = max(worst, run)
+        dups += sum(n - 1 for n in counts.values() if n > 1)
+    return worst, dups
+
+
+def table_words(blocks):
+    """Tables are scored SEPARATELY by the API and are invisible in the page
+    markdown, which carries only a [tbl-N.html] placeholder. 782 of 1,762 pages
+    have one; 79,542 words -- 18% of the corpus -- live in them."""
+    out = []
+    for t in ((blocks or {}).get("tables") or []):
+        out += (t.get("word_confidence_scores") or [])
+    return out
+
+
+def bad_rate(conf):
+    return score(page_words(conf))
+
+
+def build_queue(cur):
+    """Every flagged document, worst first. One query, scored in Python because
+    the scoring rule lives in one place and must match the numbers above."""
+    cur.execute("""
+        select d.id, d.key, o.name, r.confidence, r.blocks,
+               d.meta->'ocr_review' as review
+        from ocr_reading r
+        join document d on d.id = (r.meta->>'document_id')::bigint
+        left join output_file o on o.document_id = d.id
+                        and o.build_version = 'recut-v2'
+        where r.method = %s""", (MISTRAL,))
+    docs = {}
+    for did, key, name, conf, blocks, review in cur.fetchall():
+        # Every reviewer's verdict travels with the document, so each of you can
+        # see what the other decided rather than only your own progress.
+        # isinstance guard: two older shapes exist in this table -- a bare
+        # {"approved": true} and a flat {"verdict": "..."} -- and a bare value
+        # under a reviewer key would otherwise blow up the whole queue.
+        rv = review if isinstance(review, dict) else {}
+        peers = {w: v.get("verdict") for w, v in rv.items()
+                 if w != REVIEWER and isinstance(v, dict) and v.get("verdict")}
+        me = rv.get(REVIEWER)
+        mine = me.get("verdict") if isinstance(me, dict) else None
+        d = docs.setdefault(did, {"id": did, "key": key, "pdf": name,
+                                  "pages": 0, "bad": 0, "words": 0,
+                                  "tbad": 0, "twords": 0,
+                                  "maxRep": 0, "dupRows": 0,
+                                  "verdict": mine, "peers": peers,
+                                  "done": mine in ("approved", "hold")})
+        b, t = score(page_words(conf))
+        tb, tt = score(table_words(blocks))
+        rep, dup = repetition(blocks)
+        d["pages"] += 1
+        d["bad"] += b
+        d["words"] += t
+        d["tbad"] += tb
+        d["twords"] += tt
+        d["maxRep"] = max(d["maxRep"], rep)
+        d["dupRows"] += dup
+    # A RATE ALONE MISRANKS THE QUEUE. A page where Mistral returned one scored
+    # word, and that word is bad, is 100% bad and sorts above every genuinely
+    # broken document -- while having a single character to look at. Measured:
+    # 6 of the 245 gated documents have under MIN_WORDS scored words.
+    # They are not dropped (a silently truncated queue reads as "all reviewed");
+    # they are marked thin and sorted last, after the real work.
+    # UNION GATE, not either rate alone. Table words are 18% of the corpus and
+    # OCR cleaner than prose (0.48% vs 1.37% suspect), so folding them into one
+    # ratio DILUTES a document whose prose is bad but whose big table is clean --
+    # measured, that silently drops 35 documents out of the queue while their
+    # prose errors remain. So: flag if EITHER the prose rate OR the combined
+    # rate trips the gate. Nothing escapes review by being averaged away.
+    out = []
+    for d in docs.values():
+        allw, allb = d["words"] + d["twords"], d["bad"] + d["tbad"]
+        d["rate"] = round(100.0 * d["bad"] / d["words"], 2) if d["words"] else 0.0
+        d["allRate"] = round(100.0 * allb / allw, 2) if allw else 0.0
+        d["thin"] = allw < MIN_WORDS
+        d["repeats"] = d["maxRep"] >= MAX_REPEAT
+        if d["rate"] > GATE or d["allRate"] > GATE or d["repeats"]:
+            out.append(d)
+    # Repetition first: a fabricated table is worse than a misread word, and 15
+    # of these are invisible to the confidence gate.
+    out.sort(key=lambda x: (x["thin"], not x["repeats"], -x["maxRep"],
+                            -max(x["rate"], x["allRate"])))
+    return out
+
+
+def load_doc(cur, did):
+    """All pages of one document: text, suspect-word spans, prior reading,
+    and any correction already saved."""
+    cur.execute("""
+        select r.page_id, r.meta->>'doc_page', r.text, r.confidence, r.blocks
+        from ocr_reading r
+        where r.method = %s and (r.meta->>'document_id')::bigint = %s
+        order by (r.meta->>'doc_page')::int""", (MISTRAL, did))
+    rows = cur.fetchall()
+    pids = [r[0] for r in rows]
+    corrected, corr_tbl, notes, others = {}, {}, {}, {}
+    if pids:
+        cur.execute("""select page_id, method, text, blocks, meta, ts
+                       from ocr_reading
+                       where page_id = any(%s) and method like %s
+                       order by ts""", (pids, HUMAN + ':%'))
+        for pid, method, text, blocks, meta, ts in cur.fetchall():
+            who = (method.split(":", 1)[1] if ":" in method
+                   else ((meta or {}).get("by") or "unknown")).lower()
+            if who == REVIEWER:
+                corrected[pid] = text
+                corr_tbl[pid] = (blocks or {}).get("tables")
+                notes[pid] = (meta or {}).get("note") or ""
+            else:
+                others.setdefault(pid, []).append({
+                    "by": who, "text": text or "",
+                    "note": (meta or {}).get("note") or "",
+                    "when": ts.strftime("%Y-%m-%d %H:%M") if ts else ""})
+
+    cur.execute("select name from output_file where document_id = %s "
+                "and build_version = 'recut-v2' limit 1", (did,))
+    got = cur.fetchone()
+
+    pages = []
+    for pid, doc_page, text, conf, blocks in rows:
+        words = page_words(conf)
+        spans = [{"s": w["start_index"],
+                  "e": w["start_index"] + len(w.get("text") or ""),
+                  "c": round(w.get("confidence") or 1.0, 3)}
+                 for w in words if (w.get("confidence") or 1.0) < BAD_WORD
+                 and w.get("start_index") is not None]
+        b, t = score(words)
+
+        # Tables: the markdown shows only [tbl-N.html], so hand the browser the
+        # real HTML plus the list of suspect strings inside it. Table words are
+        # indexed into the table's own content, not the page markdown, so they
+        # are matched by value in the rendered cells rather than by offset.
+        orig_tbl = ((blocks or {}).get("tables") or [])
+        saved_tbl = corr_tbl.get(pid) or []
+        by_id = {x.get("id"): x.get("content") for x in saved_tbl}
+        tables = []
+        for tb in orig_tbl:
+            tw = tb.get("word_confidence_scores") or []
+            tables.append({
+                "id": tb.get("id"),
+                "html": tb.get("content") or "",
+                "saved": by_id.get(tb.get("id")),
+                "suspect": sorted({(w.get("text") or "").strip()
+                                   for w in tw
+                                   if (w.get("confidence") or 1.0) < BAD_WORD
+                                   and (w.get("text") or "").strip()}),
+                "bad": score(tw)[0], "words": len(tw)})
+
+        pages.append({"pageId": pid, "docPage": int(doc_page or 1),
+                      "text": text or "", "spans": spans,
+                      "corrected": corrected.get(pid),
+                      "note": notes.get(pid, ""),
+                      "others": others.get(pid, []),
+                      "tables": tables,
+                      "bad": b, "words": t})
+    return {"id": did, "pdf": got[0] if got else None, "pages": pages}
+
+
+def save_page(cur, page_id, text, tables, note):
+    """Replace this page's correction -- text, tables and note in one row.
+    DELETE+INSERT because ocr_reading has no unique constraint; an INSERT
+    alone would stack another row on every save.
+
+    The NOTE is why a page was wrong, in your words, and it is the part a
+    downstream fix depends on: "this table is a repetition loop, 13 invented
+    rows" needs a different remedy from "the merchant name is misread". A
+    note alone is enough to write the row -- flagging a problem you have not
+    fixed yet must not be lost.
+    """
+    cur.execute("delete from ocr_reading where page_id = %s and method = %s",
+                (page_id, MY_METHOD))
+    if (text or "").strip() or tables or (note or "").strip():
+        cur.execute("""insert into ocr_reading
+                       (page_id, method, text, blocks, meta)
+                       values (%s, %s, %s, %s::jsonb, %s::jsonb)""",
+                    (page_id, MY_METHOD, text or "",
+                     json.dumps({"tables": tables or []}, ensure_ascii=False),
+                     json.dumps({"source": "ocr_review_app",
+                                 "by": REVIEWER,
+                                 "note": (note or "").strip()},
+                                ensure_ascii=False)))
+
+
+def verdict(cur, did, value):
+    """Stamp the review verdict. document.meta only -- document.state is
+    load-bearing for the pipeline and is not touched.
+
+    THREE STATES, because two were not enough:
+      approved -- reviewed, text is right, safe to embed
+      hold     -- reviewed and NOT safe to embed. The page is unreadable, or
+                  the table is fabricated, or it needs a second OCR pass.
+                  Without this, "I looked at it" and "it is correct" were the
+                  same click, and a page noted as unreadable would still have
+                  a guess stamped into it.
+      (absent) -- not yet reviewed
+    The embed step must select on approved, never on 'has been opened'.
+    """
+    cur.execute("""update document set meta = coalesce(meta,'{}'::jsonb) ||
+                   jsonb_build_object('ocr_review',
+                     coalesce(meta->'ocr_review','{}'::jsonb) -
+                       'verdict' - 'approved' ||
+                     jsonb_build_object(%s::text,
+                       jsonb_build_object('verdict', %s::text)))
+                   where id = %s""", (REVIEWER, value, did))
+
+
+def page_png(pdf_name, doc_page):
+    path = os.path.join(RECUT, pdf_name)
+    if not pdf_name or ".." in pdf_name or not os.path.isfile(path):
+        return None
+    doc = fitz.open(path)
+    try:
+        idx = max(0, min(doc.page_count - 1, doc_page - 1))
+        pix = doc[idx].get_pixmap(dpi=RENDER_DPI)
+        return pix.tobytes("png")
+    finally:
+        doc.close()
+
+
+class Handler(SimpleHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+        b = body if isinstance(body, bytes) else body.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(b)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(b)
+
+    def do_GET(self):
+        u = urlparse(self.path)
+        path, q = unquote(u.path), parse_qs(u.query)
+        try:
+            if path in ("/", "/index.html"):
+                return self._send(200, HTML, "text/html; charset=utf-8")
+            if path == "/favicon.ico":
+                return self._send(204, b"", "image/x-icon")
+            with db() as c, c.cursor() as cur:
+                if path == "/queue":
+                    return self._send(200, json.dumps(build_queue(cur)))
+                if path == "/doc":
+                    return self._send(200, json.dumps(
+                        load_doc(cur, int(q.get("id", ["0"])[0]))))
+            if path == "/page.png":
+                png = page_png(q.get("pdf", [""])[0],
+                               int(q.get("p", ["1"])[0]))
+                if not png:
+                    return self._send(404, b"", "image/png")
+                return self._send(200, png, "image/png")
+        except Exception as e:                                    # noqa: BLE001
+            return self._send(500, json.dumps({"error": "%s: %s"
+                                               % (type(e).__name__, e)}))
+        return self._send(404, '{"error":"not found"}')
+
+    def do_POST(self):
+        path = unquote(urlparse(self.path).path)
+        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            p = json.loads(self.rfile.read(n) or b"{}")
+            with db() as c, c.cursor() as cur:
+                if path == "/save":
+                    save_page(cur, int(p["pageId"]), p.get("text", ""),
+                              p.get("tables") or [], p.get("note", ""))
+                elif path == "/verdict":
+                    v = p.get("verdict")
+                    if v not in ("approved", "hold", None):
+                        return self._send(400, '{"error":"bad verdict"}')
+                    verdict(cur, int(p["id"]), v)
+                else:
+                    return self._send(404, '{"error":"not found"}')
+                c.commit()
+            return self._send(200, '{"ok":true}')
+        except Exception as e:                                    # noqa: BLE001
+            return self._send(500, json.dumps({"error": "%s: %s"
+                                               % (type(e).__name__, e)}))
+
+
+HTML = r"""<!doctype html><meta charset="utf-8"><title>OCR review</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#2a2f3a;--fg:#e6e9ef;--dim:#8b93a7;
+--bad:#ff6b6b;--ok:#4ade80;--add:#14532d;--del:#5b1d1d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);
+font:13px/1.5 ui-sans-serif,system-ui,sans-serif;height:100vh;display:flex}
+#side{width:270px;flex:0 0 270px;border-right:1px solid var(--line);overflow:auto}
+#side h1{font-size:13px;margin:0;padding:10px 12px;border-bottom:1px solid var(--line);
+position:sticky;top:0;background:var(--panel)}
+.q{padding:7px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.q:hover{background:var(--panel)}.q.on{background:#1e2530;border-left:3px solid #6aa7ff}
+.q .k{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.q .m{color:var(--dim);font-size:11px}.q.done .k{color:var(--ok)}
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+#bar{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;gap:10px;
+align-items:center;background:var(--panel)}
+button{background:#232935;color:var(--fg);border:1px solid var(--line);
+border-radius:5px;padding:5px 11px;cursor:pointer}button:hover{background:#2c3444}
+button.p{background:#1d4ed8;border-color:#1d4ed8}
+button.h{background:#78350f;border-color:#92400e}
+.q.held .k{color:#fbbf24}
+.pk{color:#7dd3fc;font-size:10px}
+#others{flex:0 0 auto;max-height:26vh;overflow:auto;border-top:1px solid var(--line);
+background:#101720}
+.ob{padding:6px 10px;border-bottom:1px solid var(--line)}
+.ob h4{margin:0 0 3px;font-size:11px;color:#7dd3fc;font-weight:600}
+.ob .on{white-space:pre-wrap;font-size:12px}
+.ob .oc{color:var(--dim);font-size:11px;margin-top:3px}
+#panes{flex:1;display:flex;min-height:0}
+.pane{flex:1;display:flex;flex-direction:column;border-right:1px solid var(--line);
+min-width:0}.pane:last-child{border-right:0}
+.ph{padding:5px 10px;font-size:11px;color:var(--dim);background:var(--panel);
+border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+.pb{flex:1;overflow:auto;padding:10px}
+#imgwrap{position:relative;overflow:hidden;height:100%;background:#0b0d11;
+cursor:grab}
+#imgwrap.drag{cursor:grabbing}
+#img{display:block;background:#fff;transform-origin:0 0;
+image-rendering:-webkit-optimize-contrast}
+#zbar{position:absolute;right:8px;top:8px;z-index:5;display:flex;gap:4px;
+background:rgba(15,17,21,.85);border:1px solid var(--line);border-radius:6px;
+padding:3px}
+#zbar button{padding:2px 8px;font-size:12px;line-height:1.4}
+#zl{align-self:center;color:var(--dim);font-size:11px;padding:0 4px;min-width:38px;
+text-align:center}
+pre,textarea{margin:0;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;
+white-space:pre-wrap;word-break:break-word}
+textarea{width:100%;height:auto;min-height:20vh;background:transparent;
+color:var(--fg);border:0;outline:0;resize:vertical}
+.tw{margin:8px 0;border:1px solid var(--line);border-radius:4px;
+padding:6px;background:#141821}
+.tl{font-size:10px;color:var(--dim);margin-bottom:4px}
+.th{margin:14px 0 4px;font-size:11px;color:var(--dim);border-top:1px solid var(--line);
+padding-top:8px;display:flex;justify-content:space-between}
+table{border-collapse:collapse;width:100%;font:11px/1.4 ui-monospace,Consolas,monospace}
+td,th{border:1px solid var(--line);padding:3px 5px;vertical-align:top}
+td:focus{outline:2px solid #6aa7ff;background:#1b2130}
+mark{background:rgba(255,107,107,.28);color:#ffd7d7;border-bottom:1px solid var(--bad);
+border-radius:2px}
+ins{background:var(--add);color:#bbf7d0;text-decoration:none}
+del{background:var(--del);color:#fecaca}
+#st{margin-left:auto;color:var(--dim)}
+.hide{display:none !important}
+.nh{padding:5px 10px;font-size:11px;color:var(--dim);background:var(--panel);
+border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+#note{height:88px;min-height:88px;padding:8px 10px;flex:0 0 auto;
+font:12px/1.5 ui-sans-serif,system-ui,sans-serif;background:#14181f}
+#note::placeholder{color:#5b6478}
+button.t{padding:5px 9px;font-size:11px}
+</style>
+<div id=side><h1>Flagged documents</h1><div id=list>loading…</div></div>
+<div id=main>
+  <div id=bar>
+    <button class=t onclick="tog('side')" title="[ key">☰ list</button>
+    <button class=t onclick="tog('p-diff')" title="] key">diff</button>
+    <button onclick="pg(-1)">◀ page</button><b id=pn>—</b><button onclick="pg(1)">page ▶</button>
+    <button onclick="save()">Save page</button>
+    <button class=p onclick="setVerdict('approved')" id=bok
+      title="Saves this page first, then marks the document safe to embed">Approve ▶</button>
+    <button class=h onclick="setVerdict('hold')"
+      title="Saves this page first, then marks the document DO NOT EMBED">⏸ Hold</button>
+    <span id=st></span>
+  </div>
+  <div id=panes>
+    <div class=pane><div class=ph><span>scan</span><span id=fn></span></div>
+      <div class=pb style=padding:0>
+        <div id=imgwrap>
+          <div id=zbar>
+            <button onclick="zoom(-1)">−</button><span id=zl>fit</span>
+            <button onclick="zoom(1)">+</button><button onclick="zfit()">fit</button>
+          </div>
+          <img id=img>
+        </div>
+      </div></div>
+    <div class=pane><div class=ph><span>Mistral — suspect words marked</span>
+      <span id=bc></span></div><div class=pb><pre id=orig></pre></div></div>
+    <div class=pane><div class=ph><span>your correction (editable)</span>
+      <span id=tc></span></div>
+      <div class=pb><textarea id=ed spellcheck=false></textarea>
+        <div id=tbl></div></div>
+      <div class=nh>note — what is wrong with this page?</div>
+      <textarea id=note spellcheck=true placeholder="e.g. table is a repetition loop, ~13 invented rows · merchant name misread · handwriting unreadable, do not embed a guess"></textarea>
+      <div id=others></div>
+    </div>
+    <div class=pane id=p-diff><div class=ph><span>diff</span>
+      <select id=dm onchange=render()>
+        <option value=edit>your edits vs Mistral</option>
+        <option value=other>other reviewer vs Mistral</option></select></div>
+      <div class=pb><pre id=df></pre></div></div>
+  </div>
+</div>
+<script>
+let Q=[],D=null,i=0,dirty=false;
+const $=x=>document.getElementById(x);
+// The Approve button relabels itself when there are pending edits, so it is
+// visible on the button -- not just inferable from the code -- that approving
+// saves your work rather than discarding it.
+function mark(){dirty=true;$('st').textContent='unsaved';
+  $('bok').textContent='Save + Approve ▶';}
+function unmark(){dirty=false;$('bok').textContent='Approve ▶';}
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+async function boot(){Q=await(await fetch('/queue')).json();drawList();
+  if(Q.length)openDoc(0);}
+// ---- scan zoom / pan -------------------------------------------------------
+// The first version of this tool served the PDF itself and let the browser's
+// PDF viewer handle zoom. This one renders a page image server-side, which is
+// faster and works the same over R2 later -- but it means zoom has to be
+// implemented rather than inherited. Wheel to zoom at the cursor, drag to pan,
+// double-click to fit. Scale persists across pages so comparing two pages at
+// the same magnification does not mean re-zooming every time.
+let Z=0,ox=0,oy=0,fitS=1,drag=null;
+function apply(){const s=Z?Z:fitS;
+  $('img').style.transform=`translate(${ox}px,${oy}px) scale(${s})`;
+  $('zl').textContent=Z?Math.round(s*100)+'%':'fit';}
+function zfit(){Z=0;ox=oy=0;
+  const w=$('imgwrap'),im=$('img');
+  if(im.naturalWidth){fitS=Math.min(w.clientWidth/im.naturalWidth,
+                                    w.clientHeight/im.naturalHeight);
+    ox=(w.clientWidth-im.naturalWidth*fitS)/2;oy=0;}
+  apply();}
+function setZ(ns,cx,cy){const w=$('imgwrap').getBoundingClientRect();
+  const px=(cx-w.left-ox)/(Z||fitS), py=(cy-w.top-oy)/(Z||fitS);
+  Z=Math.max(0.1,Math.min(8,ns));
+  ox=cx-w.left-px*Z; oy=cy-w.top-py*Z; apply();}
+function zoom(d){const w=$('imgwrap').getBoundingClientRect();
+  setZ((Z||fitS)*(d>0?1.25:0.8), w.left+w.width/2, w.top+w.height/2);}
+$('imgwrap').addEventListener('wheel',e=>{e.preventDefault();
+  setZ((Z||fitS)*(e.deltaY<0?1.15:0.87), e.clientX, e.clientY);},{passive:false});
+$('imgwrap').addEventListener('mousedown',e=>{drag={x:e.clientX-ox,y:e.clientY-oy};
+  $('imgwrap').classList.add('drag');});
+addEventListener('mousemove',e=>{if(!drag)return;
+  ox=e.clientX-drag.x;oy=e.clientY-drag.y;apply();});
+addEventListener('mouseup',()=>{drag=null;$('imgwrap').classList.remove('drag');});
+$('imgwrap').addEventListener('dblclick',zfit);
+$('img').addEventListener('load',()=>{if(!Z)zfit();else apply();});
+addEventListener('resize',()=>{if(!Z)zfit();});
+
+function drawList(){$('list').innerHTML=Q.map((d,n)=>
+  `<div class="q ${n==cur?'on':''} ${d.verdict==='approved'?'done':''} ${
+     d.verdict==='hold'?'held':''}" onclick="openDoc(${n})">
+   <span class=k>${d.verdict==='approved'?'✓ ':d.verdict==='hold'?'⏸ ':''}${
+     d.repeats?'⟳ ':''}${d.thin?'· ':''}${esc(d.key)}${
+     Object.keys(d.peers||{}).length?` <span class=pk>${
+       Object.entries(d.peers).map(([w,v])=>
+         `${esc(w)}:${v==='approved'?'✓':'⏸'}`).join(' ')}</span>`:''}</span>
+   <span class=m>${d.repeats?`<b style=color:#fbbf24>${d.maxRep} identical rows in a row</b> · `:''}${d.rate}% text${
+     d.twords?` · ${d.allRate}% w/tables`:''} · ${
+     d.bad+d.tbad}/${d.words+d.twords} words · ${d.pages}p${
+     d.thin?' · thin, rate unreliable':''}</span></div>`
+  ).join('');}
+let cur=0;
+// NOT named open(): inline onclick handlers resolve identifiers against the
+// document object before window, so open() reached document.open(), which
+// blanks the page and starts a new stream -- the white screen. Calls from
+// normal scope (boot) hit the intended function, which is why only clicking broke.
+async function openDoc(n){if(dirty&&!confirm('Discard unsaved edits?'))return;
+  cur=n;i=0;D=await(await fetch('/doc?id='+Q[n].id)).json();drawList();render();}
+
+function marks(t,sp){if(!sp.length)return esc(t);
+  sp=sp.slice().sort((a,b)=>a.s-b.s);let o='',p=0;
+  for(const s of sp){if(s.s<p)continue;o+=esc(t.slice(p,s.s))+
+    '<mark title="confidence '+s.c+'">'+esc(t.slice(s.s,s.e))+'</mark>';p=s.e;}
+  return o+esc(t.slice(p));}
+
+// The markdown carries only "[tbl-0.html](tbl-0.html)" where a table belongs --
+// most of a receipt's content can sit behind that one placeholder. Swap each
+// one for the real table so the read pane shows the whole page, in order,
+// instead of a dead link.
+function inlineTables(html,p){
+  (p.tables||[]).forEach((t,n)=>{
+    const id=t.id||('tbl-'+n+'.html');
+    const q=id.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    html=html.replace(new RegExp('\\['+q+'\\]\\('+q+'\\)','g'),
+      '<div class=tw><div class=tl>'+id+' — '+t.bad+'/'+t.words+
+      ' suspect · edit it in the next pane</div>'+
+      (t.saved!=null?t.saved:t.html)+'</div>');
+  });
+  return html;}
+
+// Mark suspect values in the read pane's tables. Table words are indexed into
+// the table's own content, not the page markdown, so they match by cell value
+// rather than by character offset.
+function markCells(root,p){
+  const bad=new Set();(p.tables||[]).forEach(t=>t.suspect.forEach(s=>bad.add(s)));
+  root.querySelectorAll('td,th').forEach(c=>{const v=c.textContent.trim();
+    if(v&&bad.has(v))c.innerHTML='<mark>'+esc(v)+'</mark>';});}
+
+// word-level LCS: short enough to be obviously correct, and a page of OCR is
+// never large enough for the O(n*m) table to matter.
+function diff(a,b){const A=a.split(/(\s+)/),B=b.split(/(\s+)/);
+  const m=A.length,n=B.length,L=Array.from({length:m+1},()=>new Int32Array(n+1));
+  for(let x=m-1;x>=0;x--)for(let y=n-1;y>=0;y--)
+    L[x][y]=A[x]===B[y]?L[x+1][y+1]+1:Math.max(L[x+1][y],L[x][y+1]);
+  let x=0,y=0,o='';
+  while(x<m&&y<n){if(A[x]===B[y]){o+=esc(A[x]);x++;y++;}
+    else if(L[x+1][y]>=L[x][y+1]){o+='<del>'+esc(A[x])+'</del>';x++;}
+    else{o+='<ins>'+esc(B[y])+'</ins>';y++;}}
+  return o+'<del>'+esc(A.slice(x).join(''))+'</del>'
+          +'<ins>'+esc(B.slice(y).join(''))+'</ins>';}
+
+// Tables live outside the markdown -- it carries only [tbl-N.html] -- so they
+// get their own editors. Cells are contenteditable rather than raw-HTML
+// textareas: the errors are inside cell VALUES ("MAINTAINED - LAP 1-A1"), and
+// making someone hand-edit <td> tags to fix a word invites broken markup.
+function drawTables(p){
+  const host=$('tbl');host.innerHTML='';
+  let tb=0,tw=0;
+  (p.tables||[]).forEach((t,n)=>{
+    tb+=t.bad;tw+=t.words;
+    const h=document.createElement('div');
+    h.className='th';
+    h.innerHTML=`<span>table ${t.id||n} — editable</span>
+                 <span>${t.bad}/${t.words} suspect</span>`;
+    const box=document.createElement('div');
+    box.innerHTML=t.saved!=null?t.saved:t.html;
+    box.dataset.id=t.id||('tbl-'+n);
+    box.querySelectorAll('td,th').forEach(c=>{
+      c.setAttribute('contenteditable','true');
+      const v=c.textContent.trim();
+      if(v&&t.suspect.includes(v))c.innerHTML='<mark>'+esc(v)+'</mark>';
+    });
+    box.addEventListener('input',mark);
+    host.appendChild(h);host.appendChild(box);
+  });
+  $('tc').textContent=(p.tables||[]).length
+    ? `${p.tables.length} table(s) · ${tb}/${tw} suspect` : '';}
+
+// Strip the highlight wrappers before storing, so a save never persists markup
+// the review tool added for display.
+function readTables(p){
+  return Array.from($('tbl').children)
+    .filter(el=>el.dataset&&el.dataset.id)
+    .map(el=>{const c=el.cloneNode(true);
+      c.querySelectorAll('mark').forEach(m=>m.replaceWith(m.textContent));
+      c.querySelectorAll('[contenteditable]').forEach(x=>x.removeAttribute('contenteditable'));
+      return {id:el.dataset.id,format:'html',content:c.innerHTML};});}
+
+function render(){if(!D||!D.pages.length)return;
+  const p=D.pages[i];
+  $('pn').textContent=`${i+1}/${D.pages.length}`;
+  $('fn').textContent=D.pdf||'(no pdf)';
+  $('bc').textContent=`${p.bad}/${p.words}`;
+  $('img').src=D.pdf?`/page.png?pdf=${encodeURIComponent(D.pdf)}&p=${p.docPage}`:'';
+  $('orig').innerHTML=inlineTables(marks(p.text,p.spans),p);
+  markCells($('orig'),p);
+  $('ed').value=p.corrected!=null?p.corrected:p.text;
+  const dmv=$('dm').value;
+  $('df').innerHTML = dmv==='other'
+    ? ((p.others||[]).length?diff(p.text,p.others[0].text)
+       :'<i style=color:#8b93a7>no other reviewer on this page</i>')
+    : diff(p.text,$('ed').value);
+  drawTables(p);
+  $('note').value=p.note||'';
+  // What the other reviewer did on THIS page -- their note, and whether their
+  // text differs from Mistral's. Read-only: their row is theirs, and saving
+  // never touches it.
+  $('others').innerHTML=(p.others||[]).map(o=>{
+    const changed=o.text&&o.text!==p.text;
+    return `<div class=ob><h4>${esc(o.by)} — ${o.when}</h4>`+
+      (o.note?`<div class=on>${esc(o.note)}</div>`:
+              '<div class=on style=color:#8b93a7>(no note)</div>')+
+      `<div class=oc>${changed?'edited the text — '+
+        `<a href="#" onclick="showOther(${p.others.indexOf(o)});return false"
+         style=color:#7dd3fc>see their diff</a>`
+        :'no text change'}</div></div>`;}).join('')
+    ||'<div class=ob style=color:#5b6478>no other reviewer on this page</div>';
+  unmark();
+  $('st').textContent=p.corrected!=null
+    ?('saved'+(p.note?' · noted':'')) : '';}
+
+// Collapse the list and the diff to give the scan and the editor real width.
+// Preference sticks, because a review of 278 documents is many sittings.
+function tog(id){const e=$(id);e.classList.toggle('hide');
+  try{localStorage.setItem('h_'+id,e.classList.contains('hide')?'1':'')}catch(_){}}
+['side','p-diff'].forEach(id=>{try{
+  if(localStorage.getItem('h_'+id))$(id).classList.add('hide')}catch(_){}});
+
+$('ed').addEventListener('input',()=>{mark();
+  $('df').innerHTML=$('dm').value==='prior'?$('df').innerHTML
+    :diff(D.pages[i].text,$('ed').value);});
+
+function pg(d){if(dirty&&!confirm('Discard unsaved edits?'))return;
+  i=Math.max(0,Math.min(D.pages.length-1,i+d));render();}
+
+async function save(){const p=D.pages[i],t=$('ed').value,tb=readTables(p),
+  nt=$('note').value;
+  const r=await fetch('/save',{method:'POST',body:JSON.stringify(
+    {pageId:p.pageId,text:t,tables:tb,note:nt})});
+  const j=await r.json();
+  if(j.error){$('st').textContent='SAVE FAILED: '+j.error;return;}
+  p.corrected=t;p.note=nt;
+  (p.tables||[]).forEach((x,n)=>{if(tb[n])x.saved=tb[n].content;});
+  unmark();
+  $('st').textContent='saved '+new Date().toLocaleTimeString();}
+
+// ALWAYS saves first. A verdict must never discard the edits or the note that
+// justify it -- that ambiguity is the whole reason there are three states.
+async function setVerdict(v){
+  if(dirty)await save();
+  if(dirty)return;                    // save failed; the error is on screen
+  const r=await fetch('/verdict',{method:'POST',
+    body:JSON.stringify({id:D.id,verdict:v})});
+  const j=await r.json();
+  if(j.error){$('st').textContent='FAILED: '+j.error;return;}
+  Q[cur].verdict=v;drawList();
+  const nx=Q.findIndex(d=>!d.verdict);
+  if(nx>=0)openDoc(nx);else $('st').textContent='queue complete';}
+
+$('note').addEventListener('input',mark);
+
+document.addEventListener('keydown',e=>{if(e.target.tagName==='TEXTAREA'){
+  if(e.key==='s'&&(e.ctrlKey||e.metaKey)){e.preventDefault();save();}return;}
+  if(e.key==='ArrowRight')pg(1);if(e.key==='ArrowLeft')pg(-1);
+  if(e.key==='[')tog('side');if(e.key===']')tog('p-diff');});
+boot();
+</script>"""
+
+
+if __name__ == "__main__":
+    with db() as c, c.cursor() as cur:
+        q = build_queue(cur)
+    print("OCR review  ->  http://127.0.0.1:%d" % PORT)
+    print("%d documents over %.0f%% suspect words (threshold %.2f)"
+          % (len(q), GATE, BAD_WORD))
+    print("corrections write to Neon as method='%s'; Mistral rows untouched"
+          % HUMAN)
+    threading.Timer(1.0, webbrowser.open,
+                    ("http://127.0.0.1:%d" % PORT,)).start()
+    # 127.0.0.1 only -- this serves probate documents.
+    class S(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+    S(("127.0.0.1", PORT), Handler).serve_forever()
