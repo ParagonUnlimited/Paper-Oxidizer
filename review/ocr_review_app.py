@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["psycopg[binary]>=3.1", "pymupdf>=1.24"]
+# dependencies = ["psycopg[binary]>=3.1", "pymupdf>=1.24", "boto3>=1.34"]
 # ///
 """Review + correct the low-confidence Mistral OCR before it is embedded.
 
@@ -36,7 +36,7 @@ page's correction in one transaction. ocr_reading has a UNIQUE constraint on
 (page_id, method), so the method carries the reviewer -- 'human-corrected:jeff'
 -- and the database itself enforces one correction per page per reviewer.
 """
-import io, json, os, re, socketserver, sys, threading, webbrowser
+import hashlib, hmac, io, json, os, re, socketserver, sys, threading, webbrowser
 from http.server import SimpleHTTPRequestHandler
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -45,11 +45,16 @@ import psycopg
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 
-# Page images are the ONE thing Neon cannot serve -- it stores no pixels. The
-# 3.09 GB of scans live outside this repo, so the location is configurable
-# rather than assumed to sit beside the script. Set PAGE_SOURCE to wherever
-# recut/ actually is; the fallback keeps the original single-folder layout
-# working. When pages move to R2 this becomes the only thing that changes.
+# Page images are the ONE thing Neon cannot serve -- it stores no pixels.
+#
+# TWO SOURCES, in priority order:
+#   1. R2  -- pre-rendered 300 DPI JPEGs, one per page_id (render_page_jpegs.py).
+#             This is what a remote reviewer gets. The app never streams the
+#             bytes itself; it signs a short-lived URL and redirects, so the
+#             image travels R2 -> browser directly and the bucket stays private.
+#   2. local recut/ -- rasterise on demand from the source PDFs. This is the
+#             original single-machine behaviour and remains the fallback so the
+#             app still runs on Alden's laptop with nothing configured.
 RECUT = (os.environ.get("PAGE_SOURCE")
          or os.path.join(BASE, "recut")
          or "")
@@ -57,22 +62,54 @@ if not os.path.isdir(RECUT):
     alt = os.path.join(os.path.dirname(BASE), "recut")
     if os.path.isdir(alt):
         RECUT = alt
-PORT = 8778
+
+R2_BUCKET = os.environ.get("R2_BUCKET") or ""
+R2_ENDPOINT = os.environ.get("R2_ENDPOINT") or ""      # https://<acct>.r2.cloudflarestorage.com
+R2_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID") or ""
+R2_SECRET = os.environ.get("R2_SECRET_ACCESS_KEY") or ""
+R2_PREFIX = os.environ.get("R2_PREFIX", "pages")
+R2_SIGN_TTL = int(os.environ.get("R2_SIGN_TTL") or 3600)
+USE_R2 = bool(R2_BUCKET and R2_ENDPOINT and R2_KEY_ID and R2_SECRET)
+
+HOST = os.environ.get("HOST") or "127.0.0.1"
+PORT = int(os.environ.get("PORT") or 8778)
+
 BAD_WORD = 0.60          # a word below this is "suspect"
 GATE = 2.0               # % of suspect words that puts a document in the queue
 MIN_WORDS = 20           # below this a percentage is noise, not a signal
 MAX_REPEAT = 4           # consecutive identical non-blank rows = a loop
-# No Genius Scan comparison: Mistral is decisively better, so the old reading
-# has no review value. The v2 pages never had one in Neon anyway (measured: 0 of
-# 1,762) -- all 2,327 legacy readings sit on v1-merged files.
 MISTRAL, HUMAN = "mistral-ocr-4-1", "human-corrected"
-RENDER_DPI = 200         # high enough that zooming in reveals more, not blur
+RENDER_DPI = 200         # local fallback render only; R2 JPEGs are 300 DPI
 
-# WHO IS REVIEWING. Corrections are stored per reviewer -- meta.by -- so two
-# people working the same corpus never overwrite each other, and so a court
-# record can show who changed what. Set REVIEWER per deployment; the login
-# supplies it once this runs on the server.
-REVIEWER = (os.environ.get("REVIEWER") or "alden").strip().lower()
+# WHO IS REVIEWING -- now PER REQUEST, not per process.
+#
+# This used to be one process-wide REVIEWER read from the environment, which is
+# correct for one person on one laptop and wrong the moment two people share a
+# deployment: whoever the server was started as would own every correction.
+# The reviewer now comes from the signed session cookie, so Alden and Jeff can
+# be in the app at the same time and each write under their own name.
+#
+# REVIEW_USERS is "name:password,name:password". Names become part of the
+# ocr_reading method, so they are normalised to lowercase here and nowhere else.
+def _parse_users(raw):
+    users = {}
+    for pair in (raw or "").split(","):
+        pair = pair.strip()
+        if not pair or ":" not in pair:
+            continue
+        name, _, pw = pair.partition(":")
+        name = name.strip().lower()
+        if name and pw:
+            users[name] = pw
+    return users
+
+
+USERS = _parse_users(os.environ.get("REVIEW_USERS"))
+# Single-user local use keeps working with no login at all.
+SOLO = (os.environ.get("REVIEWER") or "").strip().lower() if not USERS else ""
+SECRET = (os.environ.get("SESSION_SECRET")
+          or os.environ.get("NEON_DATABASE_URL") or "dev").encode()
+
 
 # ocr_reading carries a UNIQUE constraint on (page_id, method) --
 # ocr_reading_page_id_method_key. A single shared 'human-corrected' method
@@ -80,7 +117,9 @@ REVIEWER = (os.environ.get("REVIEWER") or "alden").strip().lower()
 # reviewer's save dies on a constraint violation. Putting the reviewer in the
 # method turns that constraint into exactly the rule we want: one correction
 # per page PER REVIEWER, enforced by the database rather than by convention.
-MY_METHOD = "%s:%s" % (HUMAN, REVIEWER)
+def method_for(reviewer):
+    return "%s:%s" % (HUMAN, reviewer)
+
 
 URL = os.environ.get("NEON_DATABASE_URL")
 if not URL:
@@ -158,7 +197,7 @@ def bad_rate(conf):
     return score(page_words(conf))
 
 
-def build_queue(cur):
+def build_queue(cur, reviewer):
     """Every flagged document, worst first. One query, scored in Python because
     the scoring rule lives in one place and must match the numbers above."""
     cur.execute("""
@@ -178,8 +217,8 @@ def build_queue(cur):
         # under a reviewer key would otherwise blow up the whole queue.
         rv = review if isinstance(review, dict) else {}
         peers = {w: v.get("verdict") for w, v in rv.items()
-                 if w != REVIEWER and isinstance(v, dict) and v.get("verdict")}
-        me = rv.get(REVIEWER)
+                 if w != reviewer and isinstance(v, dict) and v.get("verdict")}
+        me = rv.get(reviewer)
         mine = me.get("verdict") if isinstance(me, dict) else None
         d = docs.setdefault(did, {"id": did, "key": key, "pdf": name,
                                   "pages": 0, "bad": 0, "words": 0,
@@ -225,7 +264,7 @@ def build_queue(cur):
     return out
 
 
-def load_doc(cur, did):
+def load_doc(cur, did, reviewer):
     """All pages of one document: text, suspect-word spans, prior reading,
     and any correction already saved."""
     cur.execute("""
@@ -244,7 +283,7 @@ def load_doc(cur, did):
         for pid, method, text, blocks, meta, ts in cur.fetchall():
             who = (method.split(":", 1)[1] if ":" in method
                    else ((meta or {}).get("by") or "unknown")).lower()
-            if who == REVIEWER:
+            if who == reviewer:
                 corrected[pid] = text
                 corr_tbl[pid] = (blocks or {}).get("tables")
                 notes[pid] = (meta or {}).get("note") or ""
@@ -298,7 +337,7 @@ def load_doc(cur, did):
     return {"id": did, "pdf": got[0] if got else None, "pages": pages}
 
 
-def save_page(cur, page_id, text, tables, note):
+def save_page(cur, page_id, text, tables, note, reviewer):
     """Replace this page's correction -- text, tables and note in one row.
     DELETE+INSERT because ocr_reading has no unique constraint; an INSERT
     alone would stack another row on every save.
@@ -309,21 +348,22 @@ def save_page(cur, page_id, text, tables, note):
     note alone is enough to write the row -- flagging a problem you have not
     fixed yet must not be lost.
     """
+    my_method = method_for(reviewer)
     cur.execute("delete from ocr_reading where page_id = %s and method = %s",
-                (page_id, MY_METHOD))
+                (page_id, my_method))
     if (text or "").strip() or tables or (note or "").strip():
         cur.execute("""insert into ocr_reading
                        (page_id, method, text, blocks, meta)
                        values (%s, %s, %s, %s::jsonb, %s::jsonb)""",
-                    (page_id, MY_METHOD, text or "",
+                    (page_id, my_method, text or "",
                      json.dumps({"tables": tables or []}, ensure_ascii=False),
                      json.dumps({"source": "ocr_review_app",
-                                 "by": REVIEWER,
+                                 "by": reviewer,
                                  "note": (note or "").strip()},
                                 ensure_ascii=False)))
 
 
-def verdict(cur, did, value):
+def verdict(cur, did, value, reviewer):
     """Stamp the review verdict. document.meta only -- document.state is
     load-bearing for the pipeline and is not touched.
 
@@ -343,10 +383,12 @@ def verdict(cur, did, value):
                        'verdict' - 'approved' ||
                      jsonb_build_object(%s::text,
                        jsonb_build_object('verdict', %s::text)))
-                   where id = %s""", (REVIEWER, value, did))
+                   where id = %s""", (reviewer, value, did))
 
 
 def page_png(pdf_name, doc_page):
+    """Local fallback: rasterise straight from the source PDF. Used when R2 is
+    not configured, i.e. running on the machine that holds recut/."""
     path = os.path.join(RECUT, pdf_name)
     if not pdf_name or ".." in pdf_name or not os.path.isfile(path):
         return None
@@ -359,9 +401,103 @@ def page_png(pdf_name, doc_page):
         doc.close()
 
 
+_s3 = None
+
+
+def r2_url(page_id):
+    """A short-lived signed URL for this page's 300 DPI JPEG.
+
+    We redirect the browser here rather than streaming the bytes through this
+    process. A 47-page document is ~50 MB of JPEG; proxying that through a small
+    Coolify container would make the app the bottleneck for no benefit. Signing
+    keeps the bucket private -- these are probate documents and must not be
+    world-readable."""
+    global _s3
+    if not USE_R2:
+        return None
+    if _s3 is None:
+        import boto3                                   # noqa: PLC0415
+        from botocore.config import Config             # noqa: PLC0415
+        _s3 = boto3.client("s3", endpoint_url=R2_ENDPOINT,
+                           aws_access_key_id=R2_KEY_ID,
+                           aws_secret_access_key=R2_SECRET,
+                           region_name="auto",
+                           config=Config(signature_version="s3v4"))
+    key = "%s/%d.jpg" % (R2_PREFIX.strip("/"), int(page_id))
+    return _s3.generate_presigned_url("get_object",
+                                      Params={"Bucket": R2_BUCKET, "Key": key},
+                                      ExpiresIn=R2_SIGN_TTL)
+
+
+# ---------------------------------------------------------------- sessions
+def _sign(value):
+    return hmac.new(SECRET, value.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def make_cookie(reviewer):
+    """name|signature. Stateless, so restarting the container does not log
+    everyone out, and there is no session store to keep."""
+    return "%s|%s" % (reviewer, _sign(reviewer))
+
+
+def cookie_reviewer(header):
+    """Whoever this request is, or None. Never trusts the name without the
+    signature -- otherwise anyone could write corrections as anyone."""
+    if SOLO:
+        return SOLO
+    if not USERS:
+        return "alden"
+    for part in (header or "").split(";"):
+        part = part.strip()
+        if not part.startswith("rev="):
+            continue
+        raw = unquote(part[4:])
+        name, _, sig = raw.partition("|")
+        name = name.strip().lower()
+        if name in USERS and sig and hmac.compare_digest(sig, _sign(name)):
+            return name
+    return None
+
+
+LOGIN_HTML = """<!doctype html><meta charset="utf-8"><title>OCR review</title>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<style>
+body{font:16px/1.5 system-ui,sans-serif;background:#111;color:#eee;
+  display:grid;place-items:center;height:100vh;margin:0}
+form{background:#1c1c1c;padding:28px 30px;border-radius:10px;width:min(92vw,330px);
+  border:1px solid #333}
+h1{font-size:17px;margin:0 0 18px}
+label{display:block;font-size:12px;color:#999;margin:12px 0 4px}
+input{width:100%;padding:9px 10px;font-size:15px;border-radius:6px;
+  border:1px solid #444;background:#111;color:#eee;box-sizing:border-box}
+button{width:100%;margin-top:18px;padding:10px;font-size:15px;border:0;
+  border-radius:6px;background:#2d6cdf;color:#fff;cursor:pointer}
+.err{color:#ff8080;font-size:13px;margin-top:12px}
+</style>
+<form method=post action=/login>
+<h1>OCR review</h1>
+<label>Name</label><input name=user autofocus autocapitalize=off>
+<label>Password</label><input name=pw type=password>
+<button>Sign in</button>
+<!--ERR-->
+</form>"""
+
+
+def login_page(error=""):
+    """Token substitution, NOT %-formatting: the stylesheet contains
+    'width:100%' and a bare % is an invalid format spec, which turned the
+    login page into a 500 for anonymous visitors -- i.e. for everyone."""
+    return LOGIN_HTML.replace(
+        "<!--ERR-->",
+        '<div class="err">%s</div>' % error if error else "")
+
+
 class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    def whoami(self):
+        return cookie_reviewer(self.headers.get("Cookie"))
 
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         b = body if isinstance(body, bytes) else body.encode("utf-8")
@@ -372,26 +508,64 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
+    def _redirect(self, to, cookie=None):
+        self.send_response(302)
+        self.send_header("Location", to)
+        if cookie:
+            self.send_header("Set-Cookie",
+                             "rev=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
+                             % cookie)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self):
         u = urlparse(self.path)
         path, q = unquote(u.path), parse_qs(u.query)
         try:
-            if path in ("/", "/index.html"):
-                return self._send(200, HTML, "text/html; charset=utf-8")
             if path == "/favicon.ico":
                 return self._send(204, b"", "image/x-icon")
-            with db() as c, c.cursor() as cur:
-                if path == "/queue":
-                    return self._send(200, json.dumps(build_queue(cur)))
-                if path == "/doc":
-                    return self._send(200, json.dumps(
-                        load_doc(cur, int(q.get("id", ["0"])[0]))))
-            if path == "/page.png":
+            if path == "/healthz":                    # Coolify health check
+                return self._send(200, '{"ok":true}')
+            if path == "/login":
+                return self._send(200, login_page(), "text/html; charset=utf-8")
+
+            who = self.whoami()
+            if not who:
+                if path in ("/", "/index.html"):
+                    return self._send(200, login_page(),
+                                      "text/html; charset=utf-8")
+                return self._send(401, '{"error":"login required"}')
+
+            if path in ("/", "/index.html"):
+                return self._send(200, HTML, "text/html; charset=utf-8")
+            if path == "/whoami":
+                return self._send(200, json.dumps({"reviewer": who}))
+            if path == "/logout":
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header("Set-Cookie", "rev=; Path=/; Max-Age=0")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+
+            # Page image. R2 when configured -- redirect so the bytes go
+            # straight from R2 to the browser; local render otherwise.
+            if path in ("/page.png", "/page.img"):
+                pid = q.get("id", [""])[0]
+                if USE_R2 and pid:
+                    return self._redirect(r2_url(int(pid)))
                 png = page_png(q.get("pdf", [""])[0],
                                int(q.get("p", ["1"])[0]))
                 if not png:
                     return self._send(404, b"", "image/png")
                 return self._send(200, png, "image/png")
+
+            with db() as c, c.cursor() as cur:
+                if path == "/queue":
+                    return self._send(200, json.dumps(build_queue(cur, who)))
+                if path == "/doc":
+                    return self._send(200, json.dumps(
+                        load_doc(cur, int(q.get("id", ["0"])[0]), who)))
         except Exception as e:                                    # noqa: BLE001
             return self._send(500, json.dumps({"error": "%s: %s"
                                                % (type(e).__name__, e)}))
@@ -400,17 +574,31 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         path = unquote(urlparse(self.path).path)
         n = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(n) or b""
         try:
-            p = json.loads(self.rfile.read(n) or b"{}")
+            if path == "/login":
+                form = parse_qs(body.decode("utf-8", "replace"))
+                name = (form.get("user", [""])[0] or "").strip().lower()
+                pw = form.get("pw", [""])[0] or ""
+                if name in USERS and hmac.compare_digest(USERS[name], pw):
+                    return self._redirect("/", make_cookie(name))
+                return self._send(401, login_page("Wrong name or password."),
+                                  "text/html; charset=utf-8")
+
+            who = self.whoami()
+            if not who:
+                return self._send(401, '{"error":"login required"}')
+
+            p = json.loads(body or b"{}")
             with db() as c, c.cursor() as cur:
                 if path == "/save":
                     save_page(cur, int(p["pageId"]), p.get("text", ""),
-                              p.get("tables") or [], p.get("note", ""))
+                              p.get("tables") or [], p.get("note", ""), who)
                 elif path == "/verdict":
                     v = p.get("verdict")
                     if v not in ("approved", "hold", None):
                         return self._send(400, '{"error":"bad verdict"}')
-                    verdict(cur, int(p["id"]), v)
+                    verdict(cur, int(p["id"]), v, who)
                 else:
                     return self._send(404, '{"error":"not found"}')
                 c.commit()
@@ -683,7 +871,7 @@ function render(){if(!D||!D.pages.length)return;
   $('pn').textContent=`${i+1}/${D.pages.length}`;
   $('fn').textContent=D.pdf||'(no pdf)';
   $('bc').textContent=`${p.bad}/${p.words}`;
-  $('img').src=D.pdf?`/page.png?pdf=${encodeURIComponent(D.pdf)}&p=${p.docPage}`:'';
+  $('img').src=`/page.img?id=${p.pageId}&pdf=${encodeURIComponent(D.pdf||'')}&p=${p.docPage}`;
   $('orig').innerHTML=inlineTables(marks(p.text,p.spans),p);
   markCells($('orig'),p);
   $('ed').value=p.corrected!=null?p.corrected:p.text;
@@ -761,16 +949,25 @@ boot();
 
 if __name__ == "__main__":
     with db() as c, c.cursor() as cur:
-        q = build_queue(cur)
-    print("OCR review  ->  http://127.0.0.1:%d" % PORT)
+        q = build_queue(cur, SOLO or (sorted(USERS) or ["alden"])[0])
+    print("OCR review  ->  http://%s:%d" % (HOST, PORT))
     print("%d documents over %.0f%% suspect words (threshold %.2f)"
           % (len(q), GATE, BAD_WORD))
-    print("corrections write to Neon as method='%s'; Mistral rows untouched"
+    print("corrections write to Neon as method='%s:<reviewer>'; Mistral untouched"
           % HUMAN)
-    threading.Timer(1.0, webbrowser.open,
-                    ("http://127.0.0.1:%d" % PORT,)).start()
-    # 127.0.0.1 only -- this serves probate documents.
+    print("page images : %s" % ("R2 %s/%s (signed, %ds)"
+                                % (R2_BUCKET, R2_PREFIX, R2_SIGN_TTL)
+                                if USE_R2 else "local render from %s" % RECUT))
+    print("auth        : %s" % (", ".join(sorted(USERS)) if USERS
+                                else "OPEN (solo mode as '%s')" % (SOLO or "alden")))
+    # Only pop a browser when a human is sitting at this machine. In a container
+    # there is no browser, and HOST is 0.0.0.0 because Coolify's proxy terminates
+    # TLS in front and forwards here.
+    if HOST.startswith("127.") and os.environ.get("NO_BROWSER") != "1":
+        threading.Timer(1.0, webbrowser.open,
+                        ("http://127.0.0.1:%d" % PORT,)).start()
+
     class S(socketserver.ThreadingTCPServer):
         allow_reuse_address = True
         daemon_threads = True
-    S(("127.0.0.1", PORT), Handler).serve_forever()
+    S((HOST, PORT), Handler).serve_forever()

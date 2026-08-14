@@ -1,0 +1,29 @@
+# Coolify reads this directly. Every value comes from the environment, so no
+# secret is ever written into the repo.
+services:
+  ocr-review:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8778:8778"
+    environment:
+      # --- required ---
+      NEON_DATABASE_URL: ${NEON_DATABASE_URL}
+      # "name:password,name:password" -- the name becomes part of the
+      # ocr_reading method, so each reviewer's corrections stay theirs.
+      REVIEW_USERS: ${REVIEW_USERS}
+      # Signs the login cookie. Change it and everyone is logged out.
+      SESSION_SECRET: ${SESSION_SECRET}
+
+      # --- page images from R2 (omit all five to fall back to local render) ---
+      R2_BUCKET: ${R2_BUCKET}
+      R2_ENDPOINT: ${R2_ENDPOINT}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+      R2_PREFIX: ${R2_PREFIX:-pages}
+
+      HOST: 0.0.0.0
+      PORT: 8778
+      NO_BROWSER: "1"
