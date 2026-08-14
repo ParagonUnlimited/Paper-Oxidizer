@@ -69,7 +69,20 @@ R2_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID") or ""
 R2_SECRET = os.environ.get("R2_SECRET_ACCESS_KEY") or ""
 R2_PREFIX = os.environ.get("R2_PREFIX", "pages")
 R2_SIGN_TTL = int(os.environ.get("R2_SIGN_TTL") or 3600)
-USE_R2 = bool(R2_BUCKET and R2_ENDPOINT and R2_KEY_ID and R2_SECRET)
+
+# R2 is all-or-nothing. Treating a PARTIAL configuration as "R2 off" would send
+# the app down the local-render path, and in the container there are no PDFs to
+# render -- so every scan would come back 404 and the reviewer would see blank
+# panes with nothing in the log to explain why. One unpasted secret should not
+# look like a rendering bug.
+_R2_VARS = {"R2_BUCKET": R2_BUCKET, "R2_ENDPOINT": R2_ENDPOINT,
+            "R2_ACCESS_KEY_ID": R2_KEY_ID, "R2_SECRET_ACCESS_KEY": R2_SECRET}
+_r2_missing = sorted(k for k, v in _R2_VARS.items() if not v)
+if _r2_missing and len(_r2_missing) != len(_R2_VARS):
+    sys.exit("REFUSING TO START: R2 is partly configured. Missing: %s\n"
+             "Set all four, or none of them to render locally instead."
+             % ", ".join(_r2_missing))
+USE_R2 = not _r2_missing
 
 HOST = os.environ.get("HOST") or "127.0.0.1"
 PORT = int(os.environ.get("PORT") or 8778)
@@ -137,6 +150,16 @@ if USERS and not os.environ.get("SESSION_SECRET"):
     sys.exit("REFUSING TO START: SESSION_SECRET is required when REVIEW_USERS "
              "is set.\nWithout it the login cookie cannot be signed safely.")
 SECRET = (os.environ.get("SESSION_SECRET") or "loopback-solo-mode").encode()
+
+# There must be SOME way to show a scan. Without R2 and without a readable
+# recut/ folder, the app would start, log nothing unusual, serve the queue --
+# and then hand back 404 for every image. A reviewer would be looking at empty
+# panes wondering whether the documents were lost.
+if not USE_R2 and not os.path.isdir(RECUT):
+    sys.exit("REFUSING TO START: no page images available.\n"
+             "Either set the four R2_* variables, or point PAGE_SOURCE at a "
+             "folder of recut PDFs.\nPAGE_SOURCE currently resolves to: %r"
+             % RECUT)
 
 
 # ocr_reading carries a UNIQUE constraint on (page_id, method) --

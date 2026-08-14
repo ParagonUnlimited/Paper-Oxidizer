@@ -51,9 +51,13 @@ Steps 2–4 are resumable: re-running skips what already exists.
 | `R2_PREFIX` | no | defaults to `pages` |
 | `R2_SIGN_TTL` | no | signed-URL lifetime, seconds; default 3600 |
 
-**Omit the four `R2_*` values and the app falls back to rendering from local
-`recut/` PDFs** — which is exactly how it runs on Alden's laptop today. Same
-file, no branch, no second version to keep in step.
+**Set all four `R2_*` values, or none of them.** With none, the app renders from
+local `recut/` PDFs — exactly how it runs on Alden's laptop today, same file, no
+second version to keep in step. With a *partial* set the app refuses to start,
+because the alternative is worse: it would quietly fall back to local rendering,
+find no PDFs inside the container, and return 404 for every scan. Jeff would see
+blank panes and nothing in the log would say why. One unpasted secret should not
+look like a rendering bug.
 
 ## The app refuses to start rather than run unauthenticated
 

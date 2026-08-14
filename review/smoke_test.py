@@ -157,6 +157,48 @@ run({"HOST": "0.0.0.0", "REVIEW_USERS": "alden:pw"},   # no SESSION_SECRET
     "REVIEW_USERS without SESSION_SECRET refuses to start",
     1, "SESSION_SECRET")
 
+# A half-pasted R2 secret must not look like a rendering bug. Without this the
+# app would fall back to local rendering, find no PDFs in the container, and
+# return 404 for every scan -- blank panes, nothing in the log.
+run({"HOST": "0.0.0.0", "REVIEW_USERS": "alden:pw", "SESSION_SECRET": "s",
+     "R2_BUCKET": "b"},
+    "partial R2 config refuses to start", 1, "partly configured")
+run({"HOST": "0.0.0.0", "REVIEW_USERS": "alden:pw", "SESSION_SECRET": "s",
+     "R2_BUCKET": "b", "R2_ENDPOINT": "https://x.example",
+     "R2_ACCESS_KEY_ID": "k"},                       # secret missing
+    "R2 missing only the secret refuses to start", 1, "R2_SECRET_ACCESS_KEY")
+
+# No R2 and no readable recut/ means there is no way to show a page at all.
+run({"HOST": "0.0.0.0", "REVIEW_USERS": "alden:pw", "SESSION_SECRET": "s",
+     "PAGE_SOURCE": os.path.join(APP, "__no_such_folder__")},
+    "no image source at all refuses to start", 1, "no page images")
+
+# ...and the complete, correct configuration must still start and serve.
+print()
+print("=" * 66)
+print("D. FULLY CONFIGURED (R2 + auth) -- must start and serve")
+srv, app = boot(8893, {"REVIEW_USERS": "alden:pw-a", "SESSION_SECRET": "sec",
+                       "R2_BUCKET": "testbucket",
+                       "R2_ENDPOINT": "https://abc123.r2.cloudflarestorage.com",
+                       "R2_ACCESS_KEY_ID": "AKIATEST",
+                       "R2_SECRET_ACCESS_KEY": "secrettest"})
+check("USE_R2 is on", app.USE_R2 is True, app.USE_R2)
+s, h, b = req(8893, "POST", "/login", "user=alden&pw=pw-a")
+ck = h.get("Set-Cookie", "").split(";")[0]
+check("login works with R2 configured", s == 302 and ck.startswith("rev=alden|"), s)
+s, h, b = req(8893, "GET", "/queue", cookie=ck)
+_q = _j.loads(b)
+s2, h2, b2 = req(8893, "GET", "/doc?id=%d" % _q[0]["id"], cookie=ck)
+_pid = _j.loads(b2)["pages"][0]["pageId"]
+s3, h3, b3 = req(8893, "GET", "/page.img?id=%d" % _pid, cookie=ck)
+loc = h3.get("Location", "")
+check("/page.img 302-redirects to a signed R2 URL",
+      s3 == 302 and "X-Amz-Signature" in loc and ("/pages/%d.jpg" % _pid) in loc,
+      "%s %r" % (s3, loc[:90]))
+s4, h4, b4 = req(8893, "GET", "/page.img?id=%d" % _pid)
+check("page image still requires login", s4 == 401, s4)
+srv.shutdown()
+
 print()
 print("=" * 66)
 print("PASS %d   FAIL %d" % (ok, fail))
