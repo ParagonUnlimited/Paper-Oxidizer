@@ -113,7 +113,8 @@ services:
       - path: .env
         required: false
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c",
+      # bash, not sh: /dev/tcp is a bash builtin and Debian's sh is dash.
+      test: ["CMD", "/bin/bash", "-c",
              "exec 3<>/dev/tcp/127.0.0.1/8779 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
       interval: 30s
       timeout: 5s
