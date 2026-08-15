@@ -30,8 +30,15 @@ services:
       context: ./review
       dockerfile: Dockerfile
     restart: unless-stopped
-    ports:
-      - "8778:8778"
+    # EXPOSE, NOT PORTS. `ports: 8778:8778` publishes straight onto the VPS
+    # interface and bypasses Coolify's proxy -- the app would answer on plain
+    # http://<vps-ip>:8778 with no TLS in front. The session cookie is marked
+    # Secure off-loopback, so login would also fail there in a way that looks
+    # like a bug rather than a misconfiguration. `expose` keeps the port inside
+    # Coolify's network; assign the domain in Coolify and its proxy terminates
+    # TLS and routes to 8778.
+    expose:
+      - "8778"
     environment:
       # --- required ---
       NEON_DATABASE_URL: ${NEON_DATABASE_URL}
