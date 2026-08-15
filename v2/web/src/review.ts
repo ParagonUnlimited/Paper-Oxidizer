@@ -111,6 +111,31 @@ function effState(d: QueueDoc): string {
        : vs.has('submitted') ? 'submitted' : 'unreviewed';
 }
 
+// TWO PEOPLE work this queue at once. Each browser loaded Q once at login and
+// only ever mutated it from its own clicks, so one reviewer's submissions were
+// invisible to the other until a hard reload -- counts drifted apart within
+// minutes of real two-person use. The queue is re-pulled on window focus,
+// every 45s, and after each of our own verdicts; the open document pane and
+// any in-progress edits are deliberately untouched (only the list, counts,
+// tags and states refresh). `cur` is re-anchored by document id because a
+// refresh can reorder rows.
+let refreshing = false;
+async function refreshQueue(): Promise<void> {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    const fresh = await api<QueueDoc[]>('/api/queue');
+    const curId = Q[cur]?.id;
+    Q = fresh;
+    if (curId != null) {
+      const n = Q.findIndex(d => d.id === curId);
+      if (n >= 0) cur = n;
+    }
+    drawCounts(); drawFilters(); drawList(); drawTags();
+  } catch { /* transient network failure -- next tick will retry */ }
+  finally { refreshing = false; }
+}
+
 const VICON: Record<string, string> = { approved: '✓ ', hold: '⏸ ', submitted: '↑ ' };
 
 function drawList(): void {
@@ -421,6 +446,7 @@ async function setVerdict(v: string | null): Promise<void> {
   const nx = visible().find(([d, n]) => n !== cur && d.state === 'unreviewed');
   if (nx) openDoc(nx[1]);
   else $('st').textContent = 'no unreviewed left in this filter';
+  refreshQueue();   // pick up the other reviewer's work while we're at it
 }
 
 // Page-level approval: the grain M3's pipeline triggers on. Saves first for
@@ -594,4 +620,8 @@ export async function mount(root: HTMLElement, me: string): Promise<void> {
   drawCounts(); drawFilters(); drawList();
   const first = Q.findIndex(d => d.flagged && d.state === 'unreviewed');
   if (Q.length) openDoc(first >= 0 ? first : 0);
+
+  // Keep two concurrent reviewers looking at the same reality.
+  setInterval(refreshQueue, 45_000);
+  addEventListener('focus', refreshQueue);
 }
