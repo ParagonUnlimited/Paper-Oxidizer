@@ -1,56 +1,47 @@
-# TODO / COMPLETED — Paper-Oxidizer (handoff 2026-08-15)
+# TODO / DONE — checklist mirror of PLAN-V2.md (2026-08-15)
 
-## ✅ Completed (this build, chronological)
+## To do (in order)
 
-1. Genius Scan text layer archived to Neon as `genius_scan_v2` — 1,762 rows,
-   2.68M chars, 0 pages uncovered (before any strip could destroy it).
-2. 1,762 page JPEGs rendered at exactly 300 DPI (1.685 GB), uploaded to R2
-   `pages/`, linked in Neon `page_image` with per-page `pt_to_px`.
-3. v1 Python app: multi-user login (signed cookie, fail-closed), R2 signed
-   redirects, deployed to Coolify at ocr.dobbinscodex.cloud behind Access.
-4. Security fixes: auth fail-open closed; partial-R2/no-image-source guards;
-   Secure cookies; SESSION_SECRET required; `expose` not `ports` (proxy TLS).
-5. Cloudflare: Access apps for ocr + ocr-beta; GitHub webhook IP bypass on the
-   Coolify app; PGSSLNEGOTIATION=direct for Neon through Gateway.
-6. v1 UI: whole-corpus queue + filter chips + search, Submit/Approve-Final/Hold,
-   tag selector, queue counts, notes in sidebar, Linear tokens. (23+18+12+7 tests)
-7. v2 Rust (M1+M2): Axum server + Vite TS UI, full parity (28/28 gate),
-   page-level approval with v1 backfill, direct-TLS Neon, live on ocr-beta.
-8. 1,464 HQ PDFs uploaded to R2 `RAW-GENIUS-V2/` (M3 prerequisite).
-9. Spike A: OCRmyPDF custom plugin (`v2/sidecar/mistral_plugin.py`) 12/12.
-10. Papra integration mapped: API upload+enrich chosen over folder ingest;
-    dedup = UNIQUE(org, sha256); `documents.content` feeds FTS5.
-11. Loop 1 adjustment worker: geometry rebuild + targeted re-OCR + fanout +
-    revision badges + submission consumption (13/13 live contract test);
-    adjusted-first reads in server; provenance in UI. Commit `fcc87b2`.
-12. Crash recovery: 13.5h transcript preserved; all in-flight work recovered,
-    verified, committed.
-13. Handoff docs: STATE.md, PLAN-V2.md, ARCHITECTURE.md, this file, handoff/.
+- [ ] **Deploy adjustment worker**: add `MISTRAL_API_KEY` in Coolify → redeploy
+      → watch docs 587/920/999/1138 process → verify badges in beta UI
+- [ ] **Spike B human steps (Alden, Papra UI)**: service user in doc org only →
+      API key under it → raise `DOCUMENT_STORAGE_MAX_UPLOAD_SIZE` +
+      `SERVER_API_ROUTES_TIMEOUT_MS` → decide AI auto-tagging
+- [ ] **Spike B**: one PDF/A → Papra API → confirm `content` = our text layer →
+      delete test doc
+- [ ] **Sidecar service** (`v2/sidecar/service.py` + container: ocrmypdf,
+      gs ≥ 10.02.1, veraPDF) incl. the correction-merge (tables by id; prose by
+      difflib line alignment; low-ratio ⇒ `approximate-geometry` flag)
+- [ ] **Build runner** in Rust: all-pages-approved trigger → job kind='build' →
+      artifact table → veraPDF gate → **final proof** state in UI
+- [ ] **Delivery**: proof-confirm + `PIPELINE_DELIVER=1` → Papra API upload →
+      PATCH/tags/custom-props (neon id, sha256, revision) → artifact ledger
+- [ ] **M4 Turso**: second sqld container → mirror bin → chunk+embeddings+
+      DiskANN+FTS5 → node/edge + recursive-CTE traversal → RRF hybrid →
+      `/explore` page
+- [ ] **M5**: retire v1, docs, full-corpus batches
+- [ ] Papra webhook reconciliation (optional, after delivery works)
+- [ ] Turso config audit on the VPS (image tag, WAL, bottomless) during M4
 
-## ▶ Next actions (do in order — detail in PLAN-V2.md)
+## Done (evidence in parentheses)
 
-1. **Deploy Loop 1**: set `MISTRAL_API_KEY` in Coolify env, redeploy; verify
-   one bad-geometry submit round-trips with a v2 badge.
-2. **Loop 2 build runner**: build-job trigger on last-page-approve; sidecar
-   container (ocrmypdf v17 + verapdf + proven plugin, no apt); Rust runner
-   (SKIP LOCKED → sidecar → sha256 → artifact row → Papra API upload + PATCH
-   enrich); `PIPELINE_DELIVER` flag default OFF; one-document empirical test
-   that Papra indexes our text layer before any bulk delivery.
-3. **M4 Turso**: second sqld container (own volume, db `paper-oxidizer`);
-   audit deployed sqld image version; mirror binary Neon→Turso; chunk +
-   embeddings + DiskANN + FTS5 hybrid (RRF); node/edge graph from
-   meta.annotation; recursive-CTE traversal; SQLITE_BUSY retry everywhere.
-4. **M5 hardening**: port test suites to Rust; retire v1 (fold ocr domain +
-   Access app into v2); refresh DEPLOY.md.
-
-## Housekeeping backlog (small, safe, anytime)
-
-- [ ] Delete `human-corrected:jeff` smoke-test row in Neon (1 row).
-- [ ] Consider MAX_REPEAT 4→6 (Alden's review notes: 6 of 10 flagged loops
-      were legitimate repeated line-items).
-- [ ] Remove stale `pipeline/embed-gate.json` (artifact of abandoned
-      min-confidence gate).
-- [ ] `local pages-r2/` folder (1.7 GB) is redundant post-upload — deletable
-      once v2 fully proven.
-- [ ] Rotate the SESSION_SECRET value that appeared in a chat transcript if it
-      was ever used verbatim.
+- [x] v1 app: full-corpus filters, submit/final, tags, counts, Linear tokens
+      (deployed ocr.dobbinscodex.cloud; suites 23+12+18)
+- [x] Genius Scan layer archived: 1,762 `genius_scan_v2` rows (verified 0 missing)
+- [x] 1,762 page JPEGs 300 DPI → R2 `pages/` (1,685 MB, API-verified) +
+      `page_image` table with `pt_to_px`
+- [x] HQ sources → R2 `RAW-GENIUS-V2/` (1,464 PDFs, 3.09 GB)
+- [x] Cloudflare: Access apps for ocr/ocr-beta; GitHub-webhook bypass policy;
+      Gateway SNI fixes (PGSSLNEGOTIATION=direct / SslNegotiation::Direct)
+- [x] v2 M1 skeleton + M2 parity, page-level approval + v1 backfill
+      (m2_gate 29/29), deployed ocr-beta.dobbinscodex.cloud
+- [x] Docker: no-apt runtime, CA copy, glibc pin, bash healthcheck
+- [x] Spike A: OCRmyPDF v17 plugin replay, PDF/A-2b, 12/12
+      (`v2/sidecar/README-SPIKE.md`)
+- [x] Adjustment worker built + tested 15/15 (isolation asserted); compose
+      service added; UI provenance label; server serves adjusted readings
+- [x] Incident repaired: 4 consumed submissions restored to the right
+      reviewers; claim() doc-scoped; retryable/noop verdict semantics
+- [x] m2 gate un-frozen from snapshot numbers (invariants instead)
+- [x] Handoff docs: STATE.md, PLAN-V2.md, TODO.md, README v2 section,
+      docs/agent-memory snapshots

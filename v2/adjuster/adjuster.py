@@ -167,6 +167,11 @@ def find_candidates(cur, only_doc: int | None):
           and not exists (select 1 from job j where j.document_id = d.id
                           and j.kind = 'adjust'
                           and j.state in ('queued','running'))
+          -- errored jobs retry, but with a 1-hour backoff -- otherwise a
+          -- missing API key would spawn a fresh error job every poll.
+          and not exists (select 1 from job j where j.document_id = d.id
+                          and j.kind = 'adjust' and j.state = 'error'
+                          and j.updated_at > now() - interval '1 hour')
     """)
     enqueued = 0
     for did, review in cur.fetchall():
@@ -180,14 +185,23 @@ def find_candidates(cur, only_doc: int | None):
     return enqueued
 
 
-def claim(cur):
-    cur.execute("""
-        select id, document_id from job
-        where kind = 'adjust' and state = 'queued'
-        order by id
-        for update skip locked
-        limit 1
-    """)
+def claim(cur, only_doc: int | None = None):
+    """--doc MODE MUST CONSTRAIN THE CLAIM, NOT JUST THE ENQUEUE. Learned the
+    hard way on 2026-08-15: a --doc test run drained the whole queue and
+    consumed five of Alden's and Jeff's real submissions, because the filter
+    lived only in find_candidates while claim() took anything queued."""
+    if only_doc is not None:
+        cur.execute("""
+            select id, document_id from job
+            where kind = 'adjust' and state = 'queued' and document_id = %s
+            order by id for update skip locked limit 1
+        """, (only_doc,))
+    else:
+        cur.execute("""
+            select id, document_id from job
+            where kind = 'adjust' and state = 'queued'
+            order by id for update skip locked limit 1
+        """)
     row = cur.fetchone()
     if not row:
         return None
@@ -424,6 +438,7 @@ def adjust_document(cur, did, reocr_budget: list[int]) -> dict:
     summary = {"document_id": did, "revision": rev, "pages": [],
                "pervasive": decision["pervasive"], "reocr_cost_usd": 0.0}
     changed_pages = []
+    op_skips: list[str] = []
 
     for p in doc["pages"]:
         pid = p["page_id"]
@@ -443,14 +458,14 @@ def adjust_document(cur, did, reocr_budget: list[int]) -> dict:
 
         if actions["reocr"]:
             if not os.environ.get("MISTRAL_API_KEY"):
-                # Degrade, don't die: the free geometry remedy above still ran;
-                # the skip is recorded so the job detail says exactly why the
-                # page was not re-OCR'd.
                 entry["did"].append("reocr-SKIPPED-no-api-key")
+                op_skips.append("no-api-key")
             elif reocr_budget[0] <= 0:
                 entry["did"].append("reocr-SKIPPED-budget")
+                op_skips.append("budget")
             elif not doc["pdf"]:
                 entry["did"].append("reocr-SKIPPED-no-source-pdf")
+                op_skips.append("no-source-pdf")
             else:
                 page_pdf = fetch_source_page(s3(), doc["pdf"], p["doc_page"],
                                              actions["enhance"])
@@ -472,31 +487,50 @@ def adjust_document(cur, did, reocr_budget: list[int]) -> dict:
         if entry["did"]:
             summary["pages"].append(entry)
 
-    if changed_pages:
-        # Stale approvals: a page whose machine text just changed cannot keep
-        # an approval that was given for the old text.
-        cur.execute("delete from page_review where page_id = any(%s)",
-                    (list(set(changed_pages)),))
-        # Stamp the revision badge (system tag, rendered non-removable).
+    def consume_submission():
+        """Clear every 'submitted' verdict: the submission has been handled
+        and the document returns to the queue. Holds and finals untouched."""
+        cur.execute("select meta->'ocr_review' from document where id = %s",
+                    (did,))
+        review = cur.fetchone()[0] or {}
+        cleared = {who: v for who, v in review.items()
+                   if not (isinstance(v, dict)
+                           and v.get("verdict") == "submitted")}
+        cur.execute("""
+            update document set meta = coalesce(meta,'{}'::jsonb) ||
+              jsonb_build_object('ocr_review', %s::jsonb) where id = %s
+        """, (json.dumps(cleared), did))
+
+    def add_tag(tag):
         cur.execute("""
             update document set meta = coalesce(meta,'{}'::jsonb) ||
               jsonb_build_object('tags',
                 coalesce(meta->'tags','[]'::jsonb) || to_jsonb(%s::text))
-            where id = %s and not (coalesce(meta->'tags','[]'::jsonb)
-                                   ? %s)
-        """, (f"v{rev}", did, f"v{rev}"))
+            where id = %s and not (coalesce(meta->'tags','[]'::jsonb) ? %s)
+        """, (tag, did, tag))
 
-    # Consume the submission: clear every 'submitted' verdict so the document
-    # returns to the queue as unreviewed-with-a-vN-badge. Holds and finals are
-    # never touched (they can't coexist with candidacy anyway).
-    cur.execute("select meta->'ocr_review' from document where id = %s", (did,))
-    review = cur.fetchone()[0] or {}
-    cleared = {who: v for who, v in review.items()
-               if not (isinstance(v, dict) and v.get("verdict") == "submitted")}
-    cur.execute("""
-        update document set meta = coalesce(meta,'{}'::jsonb) ||
-          jsonb_build_object('ocr_review', %s::jsonb) where id = %s
-    """, (json.dumps(cleared), did))
+    # THREE OUTCOMES, each with different verdict semantics (2026-08-15
+    # incident: the old unconditional consume ate four real submissions that
+    # received no remedy at all).
+    if changed_pages:
+        # Remedied: stale approvals fall (text changed under them), vN badge
+        # stamped, submission consumed -> re-review the worker's output.
+        cur.execute("delete from page_review where page_id = any(%s)",
+                    (list(set(changed_pages)),))
+        add_tag(f"v{rev}")
+        consume_submission()
+    elif op_skips:
+        # Wanted to act but operationally couldn't (no API key, budget, no
+        # source PDF). The submission MUST survive: leave it, mark the job
+        # error, and a later pass retries when the condition clears.
+        summary["retryable"] = "reocr skipped: " + ", ".join(sorted(set(op_skips)))
+    else:
+        # Nothing to do -- edits-only submission or an unmappable note. The
+        # submission is consumed (the reviewer's own correction already IS the
+        # fix; Loop 2 will build from it), and 'adjust-noop' tells them the
+        # worker changed no machine text. No vN: nothing machine-side changed.
+        add_tag("adjust-noop")
+        consume_submission()
 
     summary["pages_changed"] = len(set(changed_pages))
     return summary
@@ -572,7 +606,7 @@ def run_pass(only_doc: int | None) -> int:
     while True:
         with db() as con:
             with con.cursor() as cur:
-                job = claim(cur)
+                job = claim(cur, only_doc)
                 con.commit()
                 if not job:
                     break
@@ -587,6 +621,16 @@ def run_pass(only_doc: int | None) -> int:
                         summary["copied_tags"] = (
                             [x.lower() for x in t] if isinstance(t, list) else [])
                         summary["fanned_out_to"] = fanout(cur, did, summary)
+                    if summary.get("retryable"):
+                        cur.execute("""update job set state='error',
+                                       detail=%s::jsonb, last_error=%s,
+                                       updated_at=now() where id=%s""",
+                                    (json.dumps(summary),
+                                     summary["retryable"], job_id))
+                        con.commit()
+                        print(f"doc {did}: retryable, submission preserved "
+                              f"({summary['retryable']})")
+                        continue
                     cur.execute("""update job set state='done', detail=%s::jsonb,
                                    updated_at=now() where id=%s""",
                                 (json.dumps(summary), job_id))

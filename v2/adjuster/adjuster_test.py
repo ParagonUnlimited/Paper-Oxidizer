@@ -73,6 +73,10 @@ orig_meta_json = json.dumps(orig_meta)
 
 cur.execute("select count(*) from page_review where page_id = %s", (page_id,))
 had_page_reviews = cur.fetchone()[0]
+# Legitimate adjust rows exist in the corpus (real submissions get processed);
+# leftover-detection is therefore snapshot-vs-after, not assume-zero.
+cur.execute("select count(*) from ocr_reading where method like 'adjust:%'")
+adjust_rows_before = cur.fetchone()[0]
 
 try:
     # ---- stage the submission ----------------------------------------------
@@ -95,6 +99,18 @@ try:
                                       "note": "reading order is scrambled"})))
 
     # ---- run the worker for exactly this document --------------------------
+    # Snapshot other documents' state first: on 2026-08-15 a --doc run drained
+    # the whole queue and consumed five REAL submissions. Never again.
+    cur.execute("""select count(*) from job where kind='adjust'
+                   and document_id <> %s""", (did,))
+    other_jobs_before = cur.fetchone()[0]
+    cur.execute("""select count(*) from document
+                   where id <> %s and meta->'ocr_review' @>
+                     '{}'::jsonb and exists (
+                       select 1 from jsonb_each(meta->'ocr_review') e
+                       where e.value->>'verdict' = 'submitted')""", (did,))
+    other_submitted_before = cur.fetchone()[0]
+
     env = dict(os.environ)
     env.pop("MISTRAL_API_KEY", None)      # a test must never spend money
     r = subprocess.run(
@@ -102,6 +118,18 @@ try:
         capture_output=True, text=True, timeout=600, env=env)
     print(r.stdout.strip()[-400:])
     check("worker exited 0", r.returncode == 0, r.stderr[-300:])
+
+    cur.execute("""select count(*) from job where kind='adjust'
+                   and document_id <> %s""", (did,))
+    check("ISOLATION: no jobs created/processed for other documents",
+          cur.fetchone()[0] == other_jobs_before)
+    cur.execute("""select count(*) from document
+                   where id <> %s and meta->'ocr_review' @>
+                     '{}'::jsonb and exists (
+                       select 1 from jsonb_each(meta->'ocr_review') e
+                       where e.value->>'verdict' = 'submitted')""", (did,))
+    check("ISOLATION: other documents' submissions untouched",
+          cur.fetchone()[0] == other_submitted_before)
 
     # ---- assertions ---------------------------------------------------------
     cur.execute("""select text from ocr_reading
@@ -176,9 +204,10 @@ finally:
 
     cur.execute("select meta from document where id = %s", (did,))
     restored = cur.fetchone()[0]
-    # Corpus-wide leftover check -- the whole point of the first run's lesson.
+    # Corpus-wide leftover check against the pre-test snapshot -- the first
+    # run's lesson, adapted to a corpus where legitimate adjust rows live.
     cur.execute("select count(*) from ocr_reading where method like 'adjust:%'")
-    leftovers = cur.fetchone()[0]
+    leftovers = cur.fetchone()[0] - adjust_rows_before
     cur.execute("select count(*) from page_review where page_id = %s", (page_id,))
     pr_now = cur.fetchone()[0]
     check("document meta restored byte-for-byte",

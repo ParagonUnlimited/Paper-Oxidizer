@@ -1,80 +1,94 @@
-# PLAN-V2 — approved plan + exact next actions (2026-08-15 handoff)
+# PLAN — v2 build, remaining milestones (updated 2026-08-15 ~23:50)
 
-Read STATE.md first (where everything is, lessons learned). This file is the
-approved v2 plan with per-milestone status and the precise next steps, written
-so an agent scanning the repo can resume without the prior session.
+> Read [STATE.md](STATE.md) first for what already exists. This file is the
+> ordered TO-DO with enough design detail to execute each step without
+> re-deriving it. Checklist form in [TODO.md](TODO.md).
 
-## Milestone status
+## Where we are in the original M1–M5 plan
 
-| Milestone | Status |
-|---|---|
-| M1 skeleton (Rust workspace, Vite TS web, Docker, guards) | ✅ live on ocr-beta |
-| M2 parity (queue/doc/save/verdict/tags/login + page-level approval) | ✅ 28/28 gate |
-| Loop 1 adjustment worker | ✅ committed `fcc87b2` — **deploy pending (next action 1)** |
-| M3 / Loop 2 build runner | Spike A ✅ (12/12) — runner not built |
-| M4 Turso fork | not started |
-| M5 hardening | not started |
+- **M1 (skeleton) — DONE.** Rust workspace, TS/Vite web, Docker, deployed.
+- **M2 (parity + page approval) — DONE.** 29/29 gate. Jeff can use ocr-beta.
+- **M3 (pipeline) — IN PROGRESS.**
+  - Spike A (OCRmyPDF plugin) — PROVEN 12/12 (`v2/sidecar/README-SPIKE.md`).
+  - Sources in R2 (`RAW-GENIUS-V2/`, 3.09 GB) — DONE.
+  - Adjustment worker (Loop 1) — BUILT + TESTED 15/15, **not deployed**.
+  - Remaining: deploy worker → Spike B → sidecar service → build runner →
+    final-proof stage → delivery. Details below.
+- **M4 (Turso fork) — NOT STARTED.** Design settled (see below).
+- **M5 (hardening/cutover) — NOT STARTED.**
 
-## Stack decisions (locked, researched — sources in STATE.md lessons)
+## Next actions, in order
 
-Axum + tokio-postgres(+rustls, direct TLS, ALPN `postgresql`) + deadpool ·
-Vite TypeScript front-end (Tauri rejected: Jeff needs a URL; Yew rejected:
-wasm friction) · aws-sdk-s3 (`auto`, path-style, checksums `WhenRequired`) ·
-`libsql` crate 0.9.x for Turso/sqld · OCRmyPDF v17 custom-plugin sidecar +
-veraPDF for PDF/A, **Papra API upload+enrich** (not folder ingest).
+### 1. Deploy the adjustment worker (minutes)
+Add `MISTRAL_API_KEY` in Coolify env → push already contains the compose
+service → redeploy. Watch it process the four waiting submissions (587
+re-OCRs 3 pages ≈ $0.015; 920/999/1138 likely `adjust-noop`). Verify in the
+beta UI: v2/adjust-noop badges appear, docs back in queue.
 
-## NEXT ACTIONS, in order
+### 2. Spike B — Papra acceptance (half a day, HUMAN STEPS FIRST)
+Alden, in Papra UI (no API exists for these): create service user in the
+document org only → API key under it → raise `DOCUMENT_STORAGE_MAX_UPLOAD_SIZE`
+(and `SERVER_API_ROUTES_TIMEOUT_MS`) in Coolify env → decide AI auto-tagging.
+Then: hand-run sidecar on ONE approved doc → PDF/A → upload via API to a test
+org/tag → **confirm Papra's `documents.content` contains OUR text layer**
+(unpdf reads it; no Tesseract re-OCR) → delete test doc. Gate for all delivery.
 
-### 1. Deploy Loop 1 (5 min, human)
-Set `MISTRAL_API_KEY` in Coolify UI env for the paper-oxidizer stack; redeploy.
-Verify: submit one doc on ocr-beta with `bad-geometry` + a note → worker log
-shows `rev v2`; doc returns to queue with v2 badge and adjusted text labeled.
-Without the key the worker still runs geometry-only and records why.
+### 3. Sidecar service (1 day)
+`v2/sidecar/service.py` (stdlib HTTP, port 8780, internal only) wrapping the
+proven plugin: input {r2 source key, merged replay JSON, dest artifact key} →
+downloads source, `ocrmypdf --redo-ocr --output-type pdfa --plugin
+mistral_plugin.py`, veraPDF validate, upload artifact to R2 `artifacts/`,
+return {sha256, bytes, verapdf report}. Container: python-slim + ocrmypdf 17.10
++ ghostscript ≥10.02.1 (NOT 10.0.0–10.02.0 — text corruption in redo mode) +
+veraPDF + JRE; NO apt for python deps (wheels), gs/veraPDF need apt-over-443 or
+copy-from-image — solve inside the container build, Gateway blocks port 80.
+**Correction merge** (the one unbuilt design piece): per page take latest
+human-corrected row (ts wins) → tables replace table blocks by id; prose
+re-distributed across prose blocks by difflib line alignment; alignment ratio
+< 0.5 → put corrected text in reading order across the page's prose blocks and
+flag `approximate-geometry` in the artifact QC report.
 
-### 2. Loop 2 — build runner (the remaining M3 work)
-- **Trigger**: in `v2/server` page-approve handler — when the write completes
-  the last unapproved page of a document AND effective state isn't hold,
-  insert `job(kind='build', document_id)`. Job table exists (shared DDL).
-- **Sidecar**: containerize `v2/sidecar/mistral_plugin.py` (Spike A, proven)
-  with ocrmypdf v17 + verapdf + one HTTP endpoint:
-  POST {document_id} → pulls HQ PDF from R2 `RAW-GENIUS-V2/`, corrected text
-  per page (precedence: latest human-corrected ts > adjust:* > mistral),
-  builds OcrElements from blocks, `ocrmypdf --skip-text --output-type pdfa`,
-  veraPDF validate → returns PDF/A bytes + QC report. NO apt in the image
-  (Gateway blocks port-80 apt); wheels + verapdf via its own distribution.
-- **Runner** (Rust, in server or worker binary): claim `build` jobs SKIP
-  LOCKED → call sidecar → sha256 → `artifact` row (DDL in plan §schema:
-  document_id, version vN, sha256 UNIQUE, qc_status, qc_report, delivered_at)
-  → **deliver via Papra API**: upload (returns id synchronously), then PATCH
-  enrichment (name `NNNN__Title__vN.pdf`, document_date, custom property
-  carrying Neon document id, tags). Skip if sha256 already delivered (Papra
-  UNIQUE(org, sha256) errors on re-upload of identical bytes).
-- **Gate**: `PIPELINE_DELIVER=1` env flag, default OFF. First: ONE document
-  end-to-end, then verify in Papra that `documents.content` holds our
-  corrected text (unpdf reads our layer — flagged unverified by research).
-- **UI**: queue readout gains applying / qc-failed / delivered; qc_report
-  visible on the doc.
+### 4. Build runner + final proof (1 day)
+In the Rust server (tokio task): trigger when a document's every page has
+`page_review.status='approved'` (and not hold) → job kind='build' → call
+sidecar → `artifact` row (id, document_id, version vN, sha256 UNIQUE, bytes,
+qc_status, qc_report, r2_key, delivered_at) → qc pass ⇒ document enters
+**proof** state: UI shows the built PDF (serve from R2 `artifacts/` signed) with
+selectable text; reviewer's confirm = the delivery trigger. qc fail ⇒
+`qc_failed` + report in UI, back to queue.
+UI: counts row gains applying / proof / qc-failed / delivered.
 
-### 3. M4 — Turso fork
-Second sqld container (NOT Papra's; same image/network, own volume, db
-`paper-oxidizer`). Audit deployed sqld image version first. `mirror` binary:
-Neon→Turso one-way (jsonb → SQLite JSONB blobs + generated-column indexes).
-Then `chunk(id, document_id, page_id, kind, text, embedding F32_BLOB(1024))`
-+ DiskANN (`libsql_vector_idx`) + FTS5 mirror; `node`/`edge` from
-`meta.annotation` (100% populated); hybrid search = FTS5 + `vector_top_k` +
-RRF in app code; graph = recursive CTE (works on sqld). Retry-on-SQLITE_BUSY
-on every write. Embeddings via Mistral embed API (key already in env).
-graphrag-rs = optional Neon-side experiment (pgvector backend), not a dependency.
+### 5. Delivery to Papra (half a day)
+On proof-confirm AND `PIPELINE_DELIVER=1`: skip if sha256 already in artifact
+table as delivered; POST multipart → id; PATCH {name `NNNN__Title__vN.pdf`,
+documentDate from meta.annotation, notes}; POST tags (doc_kind, issuer slug,
+revision); PUT custom properties (neon_document_id, source_sha256, revision);
+mark artifact delivered_at + papra_id. 409 ⇒ reconcile via artifact table, log,
+skip. Then Papra webhook (document.created, Standard-Webhooks signing;
+allowlist our hostname in `WEBHOOK_URL_ALLOWED_HOSTNAMES`) later for
+reconciliation only — the id arrives synchronously.
 
-### 4. M5 — hardening
-Port remaining v1 test semantics to Rust integration tests; retire v1 app
-(fold `ocr` Access app + domain to v2); DEPLOY.md refresh; delete
-`human-corrected:jeff` smoke row; consider MAX_REPEAT 4→6; drop stale
-`pipeline/embed-gate.json`.
+### 6. M4 — Turso fork (1–2 days, independent of 3–5)
+SECOND sqld container (`paper-oxidizer` DB) — never Papra's; same image/network.
+`v2/mirror` Rust bin (libsql crate 0.9 remote): one-way Neon→Turso upsert
+(jsonb → JSONB blobs + generated-column indexes); then `chunk` table
+(id, document_id, page_id, kind, text, embedding F32_BLOB) + DiskANN index
+(`libsql_vector_idx`) + FTS5 mirror; `node`/`edge` from meta.annotation
+(issuer/account/date entities), traversal = recursive CTE (sqld supports it —
+the "no recursive CTE" limitation is the NEW engine only); hybrid search =
+FTS5 + vector_top_k merged by RRF in app code; `/explore` page in the web UI.
+Retry-on-SQLITE_BUSY on every write (BEGIN CONCURRENT is page-level optimistic).
+Embeddings: Mistral embed API with the existing key.
 
-## Verification contract (unchanged from approved plan)
+### 7. M5 — hardening + cutover
+Port remaining v1 test semantics; retire v1 (delete `ocr-review` service from
+compose); DEPLOY docs; then the full-corpus run: review → build → deliver in
+batches with the artifact table as ledger.
 
-e2e: login → queue → doc → R2 image → save → approve all pages → build job →
-artifact row + veraPDF pass → Papra `documents` row with our sha256 →
-`delivered`. Turso: mirror row-count parity; vector_top_k sanity; 2-hop CTE.
-Destructive external effect (Papra upload) stays behind `PIPELINE_DELIVER`.
+## Standing rules (from the approved plan + incidents)
+- Nothing reaches Papra without BOTH human sign-offs (corrected text, then the
+  built proof). `PIPELINE_DELIVER` default OFF until Spike B passes.
+- Every write additive; Mistral rows and human rows are never mutated.
+- Any worker/test touching live data must be isolation-tested (the 2026-08-15
+  incident) and must restore state byte-for-byte.
+- Neon is the system of record; Turso is disposable until proven.

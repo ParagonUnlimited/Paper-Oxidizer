@@ -28,11 +28,46 @@ visibly-broken one.
 | Split into single documents (v2) | ✅ 1,464 files / 1,762 pages |
 | Mistral OCR (`mistral-ocr-4-1`) | ✅ loaded into Neon, ~$8.88 |
 | Genius Scan text layer archived | ✅ 1,762 rows (`genius_scan_v2`) |
-| Page images rendered @ 300 DPI | ✅ 1,762 JPEGs, 1.65 GB |
-| Images uploaded to R2 | ✅ 1,762 objects, verified |
-| Review app deployable | ✅ container + tests |
-| **Human review** | 🔄 25 of 256 queued documents |
-| Embed OCR into PDFs | ⛔ blocked until review completes |
+| Page images @300 DPI + HQ sources in R2 | ✅ `pages/` 1,685 MB · `RAW-GENIUS-V2/` 3.09 GB |
+| v1 review app (Python) | ✅ live — ocr.dobbinscodex.cloud |
+| **v2 review app (Rust + TypeScript)** | ✅ live — ocr-beta.dobbinscodex.cloud, 29/29 gate |
+| **Loop 1 — adjustment worker** | ✅ built + 15/15 tested — deploy = add `MISTRAL_API_KEY`, redeploy |
+| Loop 2 — build → PDF/A → QC → Papra | 🔄 Spike A proven 12/12; sidecar/runner next |
+| Turso fork (vector + graph) | 📋 designed, M4 |
+
+## v2 architecture (what's built and what's next)
+
+Two human loops, one delivery — nothing reaches Papra unsigned-off twice.
+Full diagram: https://claude.ai/code/artifact/66e3e15c-cf0c-4db0-ba63-de92479dfdaa
+
+```
+                      ┌─ LOOP 1 · FIX (built) ─────────────────────────┐
+ Review queue ─Submit▶─→ adjustment worker (v2/adjuster/)              │
+ (ocr-beta,           │   notes/tags → remedy per page:                │
+  Rust+TS)            │   · bad-geometry → block-geometry rebuild      │
+   ▲                  │   · needs-reocr/repetition/illegible →         │
+   │  vN badge,       │     Mistral re-OCR of HQ page from R2          │
+   └── re-queued ◄────┘   · "pervasive" → same-issuer fanout           │
+                      └────────────────────────────────────────────────┘
+                      ┌─ LOOP 2 · PROVE (next) ────────────────────────┐
+ ✔ all pages approved → build runner (Rust job, SKIP LOCKED)           │
+                      │   → sidecar: OCRmyPDF v17 + mistral_plugin.py  │
+                      │     (corrected text + block bboxes → invisible │
+                      │      layer → PDF/A-2b; Spike A 12/12)          │
+                      │   → veraPDF QC gate                            │
+   final PROOF ◄──────┘   pass → artifact row + proof in queue         │
+   reviewer confirms ───→ Papra API upload → PATCH/tags/custom props   │
+   (PIPELINE_DELIVER=1)     incl. Neon doc id + sha256 ledger          │
+                      └────────────────────────────────────────────────┘
+ Neon = record (readings, verdicts, jobs, artifacts) · R2 = bytes
+ Reading served per page: newest adjust:* else mistral (DISTINCT ON)
+```
+
+Stack decisions and their reasons, lessons learned (Gateway SNI, Coolify env
+locking, glibc, test isolation…), live row counts, and every credential's
+location: **[STATE.md](STATE.md)**. Ordered next actions: **[PLAN-V2.md](PLAN-V2.md)**
+/ **[TODO.md](TODO.md)**. Agent memory + session history snapshots:
+**docs/agent-memory/**. Loop 2's proven core: **[v2/sidecar/README-SPIKE.md](v2/sidecar/README-SPIKE.md)**.
 
 ---
 
