@@ -60,6 +60,15 @@ services:
       HOST: 0.0.0.0
       PORT: "8778"
       NO_BROWSER: "1"
+      # Coolify generates a SERVICE_* value ONLY when the compose references it
+      # -- typing the name into the env list does nothing. SERVICE_HEX_ gives 32
+      # hex chars, generated once and persisted across deploys.
+      #
+      # This one IS bound to the compose, and that is correct here: it is
+      # generated, never hand-edited, and rotating it only means logging
+      # everyone out. Credentials that DO get rotated by hand stay out of this
+      # file so Coolify keeps them editable.
+      SESSION_SECRET: ${SERVICE_HEX_SESSION}
     # Coolify writes the variables you set in its UI to a .env beside the
     # generated compose and loads them from there. Declaring it explicitly costs
     # nothing if Coolify already does it, and removes the doubt if it does not.
