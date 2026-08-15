@@ -62,6 +62,20 @@ services:
       HOST: 0.0.0.0
       PORT: "8778"
       NO_BROWSER: "1"
+      # REQUIRED TO REACH NEON THROUGH CLOUDFLARE GATEWAY.
+      #
+      # Postgres defaults to NEGOTIATED TLS: it opens a plaintext TCP connection,
+      # sends an SSLRequest, then upgrades. That first packet carries no SNI, so
+      # the Gateway rule "ALLOW NET - Server egress core" -- which matches on
+      # net.sni.domains against the cfzt-server-egress-core list -- cannot see
+      # which host is being reached, and "Block All Network Traffic not auth by
+      # email" drops it. The symptom is "server closed the connection
+      # unexpectedly" against every Neon IP, which reads like Neon being down.
+      #
+      # direct = TLS first, WITH SNI, so the allowlist matches. The Neon hosts
+      # (both direct and pooler) are already in that list. Paperless on this same
+      # VPS needs the identical setting.
+      PGSSLNEGOTIATION: direct
     # Coolify writes the variables you set in its UI to a .env beside the
     # generated compose and loads them from there. Declaring it explicitly costs
     # nothing if Coolify already does it, and removes the doubt if it does not.
