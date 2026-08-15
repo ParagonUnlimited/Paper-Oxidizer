@@ -54,3 +54,6 @@ __pycache__/
 v2/target/
 v2/web/node_modules/
 v2/web/dist/
+
+# gate/server run logs
+*.log
