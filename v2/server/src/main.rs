@@ -9,6 +9,8 @@ mod auth;
 mod config;
 mod db;
 mod r2;
+mod routes;
+mod scoring;
 
 use auth::Auth;
 use axum::extract::{Query, State};
@@ -75,6 +77,9 @@ async fn main() -> anyhow::Result<()> {
             .get(0);
         tracing::info!(documents = n, "Neon reachable (direct TLS)");
     }
+    // Idempotent DDL + the one-time backfill of page-level approvals from
+    // v1's document-level Finals.
+    routes::migrate(&app.pool).await?;
 
     let static_dir = ServeDir::new(&cfg.web_dist)
         .fallback(ServeFile::new(format!("{}/index.html", cfg.web_dist)));
@@ -86,6 +91,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/whoami", get(whoami))
         .route("/page.img", get(page_img))
         .route("/api/queue", get(api_queue))
+        .route("/api/doc", get(api_doc))
+        .route("/api/save", post(api_save))
+        .route("/api/verdict", post(api_verdict))
+        .route("/api/tags", post(api_tags))
+        .route("/api/page_verdict", post(api_page_verdict))
         .fallback_service(static_dir)
         .with_state(app.clone());
 
@@ -164,29 +174,102 @@ async fn page_img(
     }
 }
 
-/// M1 stub: proves auth + pool + JSON end to end. M2 replaces the body with
-/// the full v1 queue port (scoring, tiers, states, tags, notes).
+fn err500(e: anyhow::Error) -> Response {
+    (StatusCode::INTERNAL_SERVER_ERROR,
+     Json(json!({"error": e.to_string()}))).into_response()
+}
+
 async fn api_queue(State(app): State<S>, headers: HeaderMap) -> Response {
-    if who(&app, &headers).is_none() {
-        return unauthorized();
+    let Some(me) = who(&app, &headers) else { return unauthorized() };
+    match routes::queue(&app.pool, &me).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err500(e),
     }
-    let client = match app.pool.get().await {
-        Ok(c) => c,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR,
-                          Json(json!({"error": e.to_string()}))).into_response(),
-    };
-    match client.query_one(
-        "select count(*),
-                count(*) filter (where meta->'ocr_review' is not null)
-         from document", &[]).await
-    {
-        Ok(row) => {
-            let total: i64 = row.get(0);
-            let reviewed: i64 = row.get(1);
-            Json(json!({"total": total, "reviewed": reviewed,
-                        "note": "M1 stub — full queue lands in M2"})).into_response()
-        }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR,
-                   Json(json!({"error": e.to_string()}))).into_response(),
+}
+
+#[derive(Deserialize)]
+struct DocQ { id: i64 }
+
+async fn api_doc(State(app): State<S>, headers: HeaderMap,
+                 Query(q): Query<DocQ>) -> Response {
+    let Some(me) = who(&app, &headers) else { return unauthorized() };
+    match routes::doc(&app.pool, q.id, &me).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err500(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct SaveBody {
+    #[serde(rename = "pageId")]
+    page_id: i64,
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    tables: serde_json::Value,
+    #[serde(default)]
+    note: String,
+}
+
+async fn api_save(State(app): State<S>, headers: HeaderMap,
+                  Json(b): Json<SaveBody>) -> Response {
+    let Some(me) = who(&app, &headers) else { return unauthorized() };
+    match routes::save_page(&app.pool, b.page_id, &b.text, &b.tables, &b.note, &me).await {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => err500(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct VerdictBody { id: i64, verdict: Option<String> }
+
+async fn api_verdict(State(app): State<S>, headers: HeaderMap,
+                     Json(b): Json<VerdictBody>) -> Response {
+    let Some(me) = who(&app, &headers) else { return unauthorized() };
+    if !matches!(b.verdict.as_deref(),
+                 None | Some("submitted") | Some("approved") | Some("hold")) {
+        return (StatusCode::BAD_REQUEST,
+                Json(json!({"error": "bad verdict"}))).into_response();
+    }
+    match routes::verdict(&app.pool, b.id, b.verdict.as_deref(), &me).await {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => err500(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct TagsBody { id: i64, tags: Vec<String> }
+
+async fn api_tags(State(app): State<S>, headers: HeaderMap,
+                  Json(b): Json<TagsBody>) -> Response {
+    let Some(me) = who(&app, &headers) else { return unauthorized() };
+    if b.tags.iter().any(|t| t.len() > 40) {
+        return (StatusCode::BAD_REQUEST,
+                Json(json!({"error": "bad tags"}))).into_response();
+    }
+    let _ = me;
+    match routes::set_tags(&app.pool, b.id, &b.tags).await {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => err500(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct PageVerdictBody {
+    #[serde(rename = "pageId")]
+    page_id: i64,
+    status: Option<String>,
+}
+
+async fn api_page_verdict(State(app): State<S>, headers: HeaderMap,
+                          Json(b): Json<PageVerdictBody>) -> Response {
+    let Some(me) = who(&app, &headers) else { return unauthorized() };
+    if !matches!(b.status.as_deref(), None | Some("approved") | Some("flagged")) {
+        return (StatusCode::BAD_REQUEST,
+                Json(json!({"error": "bad status"}))).into_response();
+    }
+    match routes::page_verdict(&app.pool, b.page_id, b.status.as_deref(), &me).await {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => err500(e),
     }
 }

@@ -1,16 +1,9 @@
-// Paper-Oxidizer v2 — M1 shell.
-//
-// Login against the Rust server, then a placeholder shell proving the
-// authenticated round trip (whoami + queue stub). The full four-pane review
-// UI ports over in M2 on top of this scaffolding.
+// Paper-Oxidizer v2 — login gate, then the review surface.
+
+import './review.css';
+import { esc, mount } from './review';
 
 const app = document.getElementById('app')!;
-
-// Every dynamic value that reaches innerHTML goes through this. Document keys
-// and tags are real-world strings; the M2 port renders hundreds of them.
-const esc = (s: unknown): string =>
-  String(s).replace(/[&<>"']/g, c =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
 type Whoami = { reviewer: string };
 
@@ -45,21 +38,9 @@ function loginView(error = ''): void {
   }, { once: true });
 }
 
-async function shell(me: Whoami): Promise<void> {
-  const q = await (await fetch('/api/queue')).json();
-  app.innerHTML = `
-    <div style="padding:24px;max-width:640px;margin:0 auto">
-      <h1 style="font:590 17px/1.3 var(--font)">Paper-Oxidizer v2</h1>
-      <p style="color:var(--dim)">Signed in as <b style="color:var(--fg2)">${esc(me.reviewer)}</b>
-        · <a href="/logout" style="color:var(--accent-h)">log out</a></p>
-      <p>Corpus: <b>${esc(q.total)}</b> documents, <b>${esc(q.reviewed)}</b> carrying a verdict.</p>
-      <p class="tag">M1 skeleton — the four-pane review UI arrives in M2</p>
-    </div>`;
-}
-
 async function boot(): Promise<void> {
   const me = await whoami();
-  if (me) shell(me);
+  if (me) mount(app, esc(me.reviewer));
   else loginView();
 }
 

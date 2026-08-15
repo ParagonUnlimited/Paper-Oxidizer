@@ -62,7 +62,9 @@ s, _, b = req("GET", "/whoami", cookie=cookie)
 check("whoami", s == 200 and json.loads(b)["reviewer"] == "alden", b[:60])
 s, _, b = req("GET", "/api/queue", cookie=cookie)
 q = json.loads(b)
-check("queue reads Neon over direct TLS", s == 200 and q.get("total") == 1464, b[:100])
+check("queue reads Neon over direct TLS",
+      s == 200 and isinstance(q, list) and len(q) == 1464,
+      b[:100] if s != 200 else len(q))
 s, h, b = req("GET", "/page.img?id=796", cookie=cookie)
 loc = h.get("location") or h.get("Location") or ""
 check("image 302s to signed R2 URL",
