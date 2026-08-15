@@ -12,7 +12,12 @@ COPY web/ .
 RUN npm run build
 
 # ---- rust build ----
-FROM rust:1-slim AS rust
+# PINNED to trixie EXPLICITLY, and the runtime stage below must stay on the
+# SAME Debian release. rust:1-slim silently became trixie (glibc 2.41) when
+# Debian 13 stabilised; pairing it with a bookworm runtime (glibc 2.36) made
+# the binary exec-fail instantly -- "container starts and immediately exits",
+# with nothing in the app's own log because the loader dies before main().
+FROM rust:1-slim-trixie AS rust
 WORKDIR /s
 # Dependency layer first so code edits do not recompile the world.
 COPY Cargo.toml ./
@@ -24,7 +29,8 @@ COPY server/src server/src
 RUN touch server/src/main.rs && cargo build --release
 
 # ---- runtime ----
-FROM debian:bookworm-slim
+# Same Debian release as the rust build stage above -- glibc must match.
+FROM debian:trixie-slim
 # NO apt here, deliberately. The VPS's Cloudflare Gateway matches egress on
 # SNI, and plain-HTTP apt (deb.debian.org:80) carries none -- the block-all
 # rule drops it and the build dies. Same failure class as Postgres negotiated
