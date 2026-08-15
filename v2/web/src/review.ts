@@ -473,13 +473,21 @@ async function approvePage(): Promise<void> {
 }
 
 // ---- tags -----------------------------------------------------------------------
+// REVISION marks (v2, v3 …) are NOT user tags: the adjustment worker stamps
+// them when a submitted document comes back for re-review. They render as a
+// non-removable badge — removing one would falsify the document's history.
+const REVISION = /^v\d+$/i;
 function drawTags(): void {
   const d = Q[cur];
   if (!d) return;
-  $('tags').innerHTML = (d.tags || []).map(t =>
+  const rev = (d.tags || []).filter(t => REVISION.test(t));
+  const user = (d.tags || []).filter(t => !REVISION.test(t));
+  $('tags').innerHTML =
+    rev.map(t => `<span class=tag style="background:rgba(16,185,129,.14);color:#6ee7b7;border-color:rgba(16,185,129,.4);cursor:default" title="revision — set by the pipeline">${esc(t)}</span>`).join('') +
+    user.map(t =>
     `<span class=tag data-t="${esc(t)}" title="click to remove">${esc(t)} ×</span>`)
     .join('');
-  $('tags').querySelectorAll('.tag').forEach(el =>
+  $('tags').querySelectorAll('.tag[data-t]').forEach(el =>
     el.addEventListener('click', () =>
       pushTags((Q[cur].tags || []).filter(t => t !== (el as HTMLElement).dataset.t))));
 }
@@ -524,10 +532,9 @@ const SHELL = `
     <span id=tags></span>
     <select id=tagsel>
       <option value="">+ tag</option>
-      <option>v2</option><option>v3</option>
       <option>needs-reocr</option><option>illegible</option>
-      <option>reading-order</option><option>repetition</option>
-      <option>handwriting</option>
+      <option>reading-order</option><option>bad-geometry</option>
+      <option>repetition</option><option>handwriting</option>
       <option value="__custom">custom…</option>
     </select>
     <span id=st></span>
