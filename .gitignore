@@ -26,9 +26,11 @@ supermemory-backlog.json
 *.tiff
 
 # secrets
-.env
 *.env
-!.env.example
+# .env IS tracked, with empty values only, so Coolify reads the variable names
+# out of the repo and lists them in its UI ready to fill in. Values live in
+# Coolify, never here.
+!.env
 
 __pycache__/
 *.pyc
