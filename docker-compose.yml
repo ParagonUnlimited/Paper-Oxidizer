@@ -91,3 +91,31 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # v2 -- the Rust rewrite, running BESIDE v1 until feature parity is verified
+  # side by side. Same secrets from the same Coolify env; only the port and the
+  # domain differ. v1 is retired by deleting this file's ocr-review service,
+  # nothing else.
+  ocr-review-v2:
+    build:
+      context: ./v2
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8779"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8779"
+      # Direct TLS with SNI is done in code (tokio-postgres SslNegotiation::
+      # Direct) -- the Rust client does not read PGSSLNEGOTIATION, so no env
+      # var carries that fix here.
+    env_file:
+      - path: .env
+        required: false
+    healthcheck:
+      test: ["CMD", "/bin/sh", "-c",
+             "exec 3<>/dev/tcp/127.0.0.1/8779 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

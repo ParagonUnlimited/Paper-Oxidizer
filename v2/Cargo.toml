@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["server"]
+
+# mirror (Neon->Turso sync) joins the workspace in M4.
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+lto = "thin"
+strip = true
