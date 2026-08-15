@@ -1,5 +1,11 @@
 # Paper-Oxidizer
 
+> **Resuming work? Read [STATE.md](STATE.md) then [PLAN-V2.md](PLAN-V2.md).**
+> They are the current handoff (2026-08-15): where every resource lives, live
+> row counts, lessons learned, and the exact next actions. HANDOFF.md and
+> CHANGELOG.md are historical and contain disproved claims (corrections table
+> at the bottom of this README).
+
 Turning 1,464 scanned probate documents into searchable, verified records.
 
 The scans were split into individual documents, read with Mistral OCR, and loaded
