@@ -139,6 +139,8 @@ def main():
     ap.add_argument("--src", required=True)
     ap.add_argument("--bucket", default="dobbins-paperless-scans")
     ap.add_argument("--prefix", default=os.environ.get("R2_PREFIX", "pages"))
+    ap.add_argument("--ext", default="jpg",
+                    help="file extension to upload (jpg or pdf)")
     ap.add_argument("--dry", action="store_true")
     args = ap.parse_args()
 
@@ -159,7 +161,10 @@ def main():
                       config=Config(signature_version="s3v4",
                                     retries={"max_attempts": 5, "mode": "standard"}))
 
-    files = sorted(f for f in os.listdir(args.src) if f.lower().endswith(".jpg"))
+    ext = "." + args.ext.lower().lstrip(".")
+    ctype = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
+             "pdf": "application/pdf"}.get(ext[1:], "application/octet-stream")
+    files = sorted(f for f in os.listdir(args.src) if f.lower().endswith(ext))
     print("local JPEGs : %d" % len(files))
     print("bucket      : %s   prefix: %s" % (bucket, args.prefix))
 
@@ -196,7 +201,7 @@ def main():
             continue
         try:
             s3.upload_file(path, bucket, key,
-                           ExtraArgs={"ContentType": "image/jpeg",
+                           ExtraArgs={"ContentType": ctype,
                                       "CacheControl": "public, max-age=31536000, immutable"})
             up += 1
             sent += size
