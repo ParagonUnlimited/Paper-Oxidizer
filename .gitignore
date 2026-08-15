@@ -32,6 +32,25 @@ supermemory-backlog.json
 # Coolify, never here.
 !.env
 
+# recovered session transcripts - full tool output, includes connection strings
+_session-recovery-backup/
+
+# Database exports. The Papra export in this folder carries LIVE auth_sessions
+# and api_keys rows -- one stray `git add -A` must never be able to publish it.
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Claude Code session state and git worktrees
+.claude/
+
 __pycache__/
 *.pyc
 .venv/
+
+# v2 build output
+v2/target/
+v2/web/node_modules/
+v2/web/dist/
