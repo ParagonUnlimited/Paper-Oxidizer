@@ -60,6 +60,14 @@ services:
       HOST: 0.0.0.0
       PORT: "8778"
       NO_BROWSER: "1"
+    # Coolify writes the variables you set in its UI to a .env beside the
+    # generated compose and loads them from there. Declaring it explicitly costs
+    # nothing if Coolify already does it, and removes the doubt if it does not.
+    # required:false so a local `docker compose` run still works with no .env --
+    # locally the app reads the real environment instead.
+    env_file:
+      - path: .env
+        required: false
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8778/healthz',timeout=4).status==200 else 1)"]
