@@ -27,7 +27,23 @@ pub async fn migrate(pool: &Pool) -> Result<()> {
            primary key (page_id, reviewer)
          );
          create index if not exists page_review_status_idx
-           on page_review (status);",
+           on page_review (status);
+         -- Shared pipeline job table (adjust worker / Loop 2 build runner).
+         -- The adjuster carries the same idempotent DDL so whichever starts
+         -- first creates it.
+         create table if not exists job (
+           id bigserial primary key,
+           kind text not null,
+           document_id bigint not null,
+           state text not null default 'queued',
+           attempts int not null default 0,
+           detail jsonb,
+           last_error text,
+           created_at timestamptz not null default now(),
+           updated_at timestamptz not null default now()
+         );
+         create index if not exists job_kind_state_idx on job (kind, state);
+         create index if not exists job_document_idx on job (document_id);",
     ).await?;
     let backfilled = client.execute(
         "insert into page_review (page_id, reviewer, status)
@@ -56,15 +72,22 @@ fn s(v: Option<&Value>) -> String {
 pub async fn queue(pool: &Pool, reviewer: &str) -> Result<Value> {
     let client = pool.get().await?;
 
+    // One reading per page, adjusted-first: after the adjustment worker
+    // writes an adjust:reocr:vN / adjust:geometry:vN row, THAT is the machine
+    // text under review, not the original Mistral row. DISTINCT ON picks the
+    // newest adjusted reading when one exists, else Mistral. Adjust rows carry
+    // the same meta.document_id/doc_page, so the join is unchanged.
     let rows = client.query(
         "select d.id, d.key, o.name, r.confidence, r.blocks,
                 d.meta->'ocr_review' as review,
                 d.meta->'tags' as tags
-         from ocr_reading r
+         from (select distinct on (page_id) *
+               from ocr_reading
+               where method = $1 or method like 'adjust:%'
+               order by page_id, (method like 'adjust:%') desc, ts desc) r
          join document d on d.id = (r.meta->>'document_id')::bigint
          left join output_file o on o.document_id = d.id
-                         and o.build_version = 'recut-v2'
-         where r.method = $1",
+                         and o.build_version = 'recut-v2'",
         &[&MISTRAL],
     ).await?;
 
@@ -208,10 +231,17 @@ pub async fn queue(pool: &Pool, reviewer: &str) -> Result<Value> {
 /// correction, note, other reviewers' work, editable tables, page approvals.
 pub async fn doc(pool: &Pool, did: i64, reviewer: &str) -> Result<Value> {
     let client = pool.get().await?;
+    // Adjusted-first, same rule as queue(): the newest adjust:* reading is the
+    // page's machine text once the worker has run. r.method rides along so the
+    // UI can label provenance.
     let rows = client.query(
-        "select r.page_id, r.meta->>'doc_page', r.text, r.confidence, r.blocks
-         from ocr_reading r
-         where r.method = $1 and (r.meta->>'document_id')::bigint = $2
+        "select r.page_id, r.meta->>'doc_page', r.text, r.confidence, r.blocks,
+                r.method
+         from (select distinct on (page_id) *
+               from ocr_reading
+               where (method = $1 or method like 'adjust:%')
+                 and (meta->>'document_id')::bigint = $2
+               order by page_id, (method like 'adjust:%') desc, ts desc) r
          order by (r.meta->>'doc_page')::int",
         &[&MISTRAL, &did],
     ).await?;
@@ -322,8 +352,14 @@ pub async fn doc(pool: &Pool, did: i64, reviewer: &str) -> Result<Value> {
                 })
             }).collect();
 
+        // src: which reading this page's machine text came from -- "mistral"
+        // or the adjustment method (adjust:reocr:v2 ...). The UI shows it so
+        // a reviewer always knows whether they are re-reviewing worker output.
+        let method: String = r.get::<_, Option<String>>(5).unwrap_or_default();
+        let src = if method == MISTRAL { "mistral".to_string() } else { method };
         json!({
             "pageId": pid, "docPage": doc_page, "text": text, "spans": spans,
+            "src": src,
             "corrected": corrected.get(&pid),
             "note": notes.get(&pid).cloned().unwrap_or_default(),
             "others": others.get(&pid).cloned().unwrap_or_default(),

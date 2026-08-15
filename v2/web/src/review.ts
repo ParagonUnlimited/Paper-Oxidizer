@@ -26,6 +26,7 @@ interface Other { by: string; text: string; note: string; when: string }
 interface Approval { by: string; status: string }
 interface Page {
   pageId: number; docPage: number; text: string; spans: Span[];
+  src?: string;                      // "mistral" or adjust:reocr:v2 etc.
   corrected: string | null; note: string; others: Other[];
   tables: TableT[]; bad: number; words: number; approvals: Approval[];
 }
@@ -374,6 +375,13 @@ function render(): void {
   $('pn').textContent = `${i + 1}/${D.pages.length}`;
   $('fn').textContent = D.pdf || '(no pdf)';
   $('bc').textContent = `${p.bad}/${p.words}`;
+  // Provenance: after the adjustment worker runs, the machine text under
+  // review is the worker's output, and the reviewer must be able to SEE that
+  // (adjust:reocr:v2 has fresh suspect marks; adjust:geometry:vN has none —
+  // its words were reordered, not re-scored, so read it with your eyes).
+  $('srclabel').textContent =
+    !p.src || p.src === 'mistral' ? 'Mistral — suspect words marked'
+      : `${p.src} — adjusted by the pipeline`;
   ($('img') as HTMLImageElement).src = `/page.img?id=${p.pageId}`;
   const orig = $('orig');
   orig.innerHTML = inlineTables(marks(p.text, p.spans), p);
@@ -551,7 +559,7 @@ const SHELL = `
           <img id=img>
         </div>
       </div></div>
-    <div class=pane><div class=ph><span>Mistral — suspect words marked</span>
+    <div class=pane><div class=ph><span id=srclabel>Mistral — suspect words marked</span>
       <span id=bc></span></div><div class=pb><pre id=orig></pre></div></div>
     <div class=pane><div class=ph><span>your correction (editable)</span>
       <span id=tc></span></div>

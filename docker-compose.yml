@@ -120,3 +120,21 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+
+  # Loop 1 -- the adjustment worker. Consumes Submit ▶ + notes: applies the
+  # remedy each note/tag names (geometry rebuild locally; targeted Mistral
+  # re-OCR of the HQ source page from R2), writes results as NEW readings,
+  # stamps the vN revision badge, and returns the document to the queue.
+  # No ports: it serves nothing. Needs the same Coolify env as the apps plus
+  # MISTRAL_API_KEY (set it in the Coolify UI; ~$0.005 per re-OCR'd page,
+  # capped at ADJUST_MAX_REOCR_PAGES per pass, default 200 = $1).
+  adjustment-worker:
+    build:
+      context: ./v2/adjuster
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PGSSLNEGOTIATION: direct
+    env_file:
+      - path: .env
+        required: false
