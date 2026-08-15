@@ -89,6 +89,10 @@ cd Paper-Oxidizer
 ### Configure
 Everything reads from the environment. Nothing is committed.
 
+For the Coolify deployment, these are set **in the Coolify UI**, not in
+`docker-compose.yml` — Coolify locks any variable the compose file names, making
+it uneditable from the UI. The compose names only fixed wiring.
+
 | Variable | Needed by | Notes |
 |---|---|---|
 | `NEON_DATABASE_URL` | everything | Postgres connection string |

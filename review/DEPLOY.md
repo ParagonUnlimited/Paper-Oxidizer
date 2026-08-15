@@ -39,6 +39,15 @@ Steps 2–4 are resumable: re-running skips what already exists.
 
 ## Environment
 
+**Set these in the Coolify UI. Do not add them to `docker-compose.yml`.**
+
+Coolify imports any variable a compose file names and then binds it to that
+file — the UI will not let you edit or delete it, and tells you to remove it
+from the compose first. Naming secrets in the compose therefore makes them
+read-only in Coolify, which is the wrong shape for credentials that rotate.
+The compose deliberately names only fixed container wiring (`HOST`, `PORT`,
+`NO_BROWSER`). This matches how Hermes and Papra are already deployed.
+
 | Variable | Required | Notes |
 |---|---|---|
 | `NEON_DATABASE_URL` | yes | Postgres connection string |
