@@ -25,7 +25,9 @@
 services:
   ocr-review:
     build:
-      context: .
+      # This file sits at the repo root so Coolify finds it with no path
+      # configuration; the app and its Dockerfile live in review/.
+      context: ./review
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:

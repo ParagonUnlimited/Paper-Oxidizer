@@ -157,7 +157,9 @@ Then humans review, and only after that does anything get embedded.
 ## Deploy for a remote reviewer
 
 Full detail in [`review/DEPLOY.md`](review/DEPLOY.md). Short version: point
-Coolify at `review/docker-compose.yml` and set the environment variables above.
+Coolify at this repo and set the environment variables above. `docker-compose.yml`
+sits at the **repo root** so Coolify finds it with no path configuration; it
+builds from `./review`, where the app and its Dockerfile live.
 
 ```
 browser ──▶ container ──▶ Neon      text, confidence, corrections, verdicts

@@ -92,7 +92,8 @@ startup guards.
 
 ## Coolify
 
-1. New resource → Docker Compose → point at this repo, `review/docker-compose.yml`
+1. New resource → Docker Compose → point at this repo. `docker-compose.yml` is at
+   the **repo root** (it builds from `./review`), so no path needs configuring.
 2. Paste the environment variables above
 3. Set the domain; Coolify terminates TLS in front
 4. Deploy
