@@ -1,8 +1,11 @@
 # Paper-Oxidizer
 
-> **Resuming work? Read [STATE.md](STATE.md) then [PLAN-V2.md](PLAN-V2.md).**
-> They are the current handoff (2026-08-15): where every resource lives, live
-> row counts, lessons learned, and the exact next actions. HANDOFF.md and
+> **Resuming work? Read in order: [STATE.md](STATE.md) →
+> [PLAN-V2.md](PLAN-V2.md) → [ARCHITECTURE.md](ARCHITECTURE.md) →
+> [TODO.md](TODO.md) → [handoff/](handoff/README.md).**
+> Together they are the 2026-08-15 handoff: every resource location, live row
+> counts, what is built vs decided-vs-rejected, done/pending lists, lessons
+> learned, the approved plan, and the session memories. HANDOFF.md and
 > CHANGELOG.md are historical and contain disproved claims (corrections table
 > at the bottom of this README).
 
