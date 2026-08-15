@@ -67,7 +67,12 @@ R2_BUCKET = os.environ.get("R2_BUCKET") or ""
 R2_ENDPOINT = os.environ.get("R2_ENDPOINT") or ""      # https://<acct>.r2.cloudflarestorage.com
 R2_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID") or ""
 R2_SECRET = os.environ.get("R2_SECRET_ACCESS_KEY") or ""
-R2_PREFIX = os.environ.get("R2_PREFIX", "pages")
+# `or` not `get(key, default)`: Coolify passes every variable named in .env,
+# including the optional ones left blank, so these arrive as EMPTY STRINGS
+# rather than absent. get("R2_PREFIX", "pages") would then return "" and every
+# object key would come out as "/1234.jpg" instead of "pages/1234.jpg" -- every
+# image 404s, with nothing in the log to say why.
+R2_PREFIX = (os.environ.get("R2_PREFIX") or "pages").strip() or "pages"
 R2_SIGN_TTL = int(os.environ.get("R2_SIGN_TTL") or 3600)
 
 # R2 is all-or-nothing. Treating a PARTIAL configuration as "R2 off" would send
