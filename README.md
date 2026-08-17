@@ -1,5 +1,17 @@
 # Paper-Oxidizer
 
+## Project status
+
+[![Version](https://img.shields.io/badge/version-0.2.2-blue)](./CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+[![Last updated](https://img.shields.io/badge/updated-2026--08--16-lightgrey)](./CHANGELOG.md)
+
+## Standard GitHub links
+
+[Issues](.github/ISSUE_TEMPLATE/bug_report.md) · [Pull Requests](.github/PULL_REQUEST_TEMPLATE.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md) · [Code of Conduct](./CODE_OF_CONDUCT.md) · [Roadmap](./ROADMAP.md)
+
+---
+
 > **Resuming work? Read in order: [STATE.md](STATE.md) →
 > [PLAN-V2.md](PLAN-V2.md) → [ARCHITECTURE.md](ARCHITECTURE.md) →
 > [TODO.md](TODO.md) → [handoff/](handoff/README.md).**

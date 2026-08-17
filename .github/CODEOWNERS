@@ -1,0 +1,21 @@
+# CODEOWNERS — every change must be reviewed by at least one listed owner.
+#
+# Add the team or individual that needs to review the path. The last match
+# wins, so put the more-specific entries first.
+#
+# https://docs.github.com/en/repositories/working-with-files/managing-repository-settings/about-code-owners
+
+# Everything by default
+*                                       @ParagonUnlimited
+
+# Server-side Rust + the data schema — break this and the adjuster loop breaks
+/v2/server/                            @ParagonUnlimited
+/v2/Cargo.toml                         @ParagonUnlimited
+
+# Front-end TypeScript — UI bugs here block human review
+/v2/web/                               @ParagonUnlimited
+
+# Deploy + infrastructure — touching this restarts the review app for everyone
+/Dockerfile                            @ParagonUnlimited
+/docker-compose.yml                    @ParagonUnlimited
+/review/                               @ParagonUnlimited

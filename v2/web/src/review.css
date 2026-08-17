@@ -1,5 +1,7 @@
 /* Review surface layout — ported from v1, drawn with the Linear tokens. */
 
+body { font-size: 14.5px; }
+
 #app { height: 100vh; display: flex; }
 
 /* ---- sidebar: counts, filters, search, list, note ---- */
@@ -13,7 +15,7 @@
   padding: 10px 12px; border-bottom: 1px solid var(--line);
   font-weight: 510; font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap;
 }
-#counts b { font-weight: 590; }
+#counts b { font-weight: 590; font-size: 14px; }
 #counts .cr { color: var(--bad); }
 #counts .cs { color: var(--accent-h); }
 #counts .cf { color: var(--ok2); }
@@ -56,6 +58,27 @@
 .ob .on { white-space: pre-wrap; font-size: 12px; color: var(--fg2); }
 .ob .oc { color: var(--dim); font-size: 11px; margin-top: 3px; }
 
+/* tag selector sits in a dedicated row right under the note editor —
+   visually grouped so it doesn't compete with the +tag dropdown for the
+   top toolbar. accent border + slight bump in size + breathing room
+   make it the obvious second action after writing the note. */
+.noterow {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--lvl3);
+}
+.noterow .nrl {
+  font: 510 11px/1.4 var(--font); color: var(--dim);
+}
+.noterow #tagsel {
+  flex: 1; min-width: 0;
+  font-size: 12.5px; padding: 6px 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: rgba(113, 112, 255, .08);
+}
+
 /* ---- main: bar + panes ---- */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #bar {
@@ -64,6 +87,7 @@
   background: var(--panel);
 }
 #bar .small { padding: 5px 9px; font-size: 11px; }
+#bar button { font-size: 13.5px; }
 #tags { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 #tags .tag { cursor: pointer; }
 #tags .tag:hover {
@@ -84,6 +108,21 @@
   display: flex; justify-content: space-between;
 }
 .pb { flex: 1; overflow: auto; padding: 10px; }
+/* The editable pane nests #ed (a textarea) inside .pb. The pane's outer
+   scrollbar was duplicating the textarea's native scrollbar — kill the
+   .pb scroll only inside the correction pane and let #ed scroll itself.
+   .pb:has(#ed) is supported in modern Chromium / Safari / Firefox 121+. */
+.pb:has(#ed) { overflow: hidden; }
+#ed-source {
+  max-height: 32vh; overflow: auto;
+  margin: 0 10px 6px; padding: 6px 10px;
+  border: 1px solid var(--line2); border-radius: var(--radius);
+  background: var(--lvl3);
+  font: 12px/1.55 var(--mono); color: var(--dim);
+  white-space: pre-wrap;
+}
+.ebp { margin: 0 0 8px; }
+.ebp:last-child { margin-bottom: 0; }
 
 /* scan pane */
 #imgwrap {
@@ -131,15 +170,50 @@ td:focus { outline: 2px solid var(--accent); background: var(--lvl3); }
 
 .hide { display: none !important; }
 
+/* reject popover — opens from the ↩ Reject button in the toolbar. Hides
+   itself until .openRejectPopover() removes the [hidden] attribute. */
+#rejectpop {
+  position: absolute; right: 14px; top: 56px; z-index: 30;
+  width: 320px;
+  background: var(--panel); color: var(--fg);
+  border: 1px solid var(--line2); border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .55);
+}
+#rejectpop > div:first-child {
+  font: 590 12px/1.4 var(--font); color: var(--dim); margin-bottom: 8px;
+}
+#rejectpop select, #rejectpop textarea {
+  width: 100%; margin-top: 6px; font-size: 12px;
+}
+#rejectpop textarea { min-height: 64px; resize: vertical; }
+#rejtagwrap {
+  display: flex; align-items: center; gap: 8px; margin-top: 6px;
+}
+#rejtagwrap > span {
+  font: 510 11px/1.4 var(--font); color: var(--dim);
+}
+#rejtagwrap select { flex: 1; }
+#rejactions {
+  display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px;
+}
+
 /* page-approval strip under the bar */
 #pagestrip {
   display: flex; gap: 3px; padding: 4px 12px; background: var(--panel);
   border-bottom: 1px solid var(--line); overflow-x: auto;
 }
 .pgdot {
-  min-width: 22px; text-align: center; font: 510 10px/1.8 var(--font);
+  min-width: 22px; text-align: center; font: 510 11px/1.8 var(--font);
   border: 1px solid var(--line2); border-radius: 4px; color: var(--dim);
   cursor: pointer; user-select: none;
 }
 .pgdot.cur { border-color: var(--accent); color: var(--fg); }
-.pgdot.ok { background: rgba(16, 185, 129, .18); color: #6ee7b7; }
+/* Per-page verdict states — touched = saved but no verdict, submitted =
+   in the worker queue, approved = final. untouched is the base style. */
+.pgdot.touched   { background: rgba(113, 112, 255, .14); color: var(--accent-h);
+                    border-color: rgba(113, 112, 255, .35); }
+.pgdot.submitted { background: rgba(94, 106, 210, .22); color: #c7caff;
+                    border-color: rgba(113, 112, 255, .45); }
+.pgdot.approved  { background: rgba(16, 185, 129, .32); color: #d1fae5;
+                    border-color: rgba(16, 185, 129, .55); font-weight: 590; }

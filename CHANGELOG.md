@@ -5,6 +5,61 @@ because several of these are things that look like details and are not.
 
 ---
 
+## 0.2.2 — 2026-08-16 — Review-app workflow + popover reject
+
+### Fixes
+
+- **Removed the per-page "Approve page" button.** It sat next to "Submit" and let
+  one click skip the rest of the document — Jeff hit "Approve Final" while aiming
+  for "Submit" and approved a dozen pages he hadn't seen. The button is gone;
+  approval is now a single decision at the document level.
+- **Submit is gated on every page saved; Approve Final is gated on every page
+  approved.** Misordered states used to be silently accepted (an approved
+  document could still have untouched pages on the server). Both buttons now
+  disable themselves until their preconditions hold, with the unmet condition
+  surfaced inline as the reason.
+
+### Added
+
+- **Popover-based Reject flow.** Required reason (dropdown of structured tags
+  the adjuster can act on), free-text note, and tag input — all three are
+  mandatory. Rejecting a page always lands a followable signal in the adjust
+  queue, never a bare "no".
+- **Page-strip status colours.** Untouched / touched / submitted / approved now
+  each carry a swatch, so the strip reads as state at a glance instead of a
+  wall of identical dots.
+
+### Fix (UI)
+
+- **Correction pane no longer nests scrollbars.** The pane had an inner scroll
+  on top of the page's outer scroll, which broke trackpad gestures and made
+  long corrections scroll inside themselves. There's now one scroll per
+  surface.
+
+### Changed
+
+- **UI fonts bumped ~10% across the whole app.** Easier to read at 1× on
+  high-DPI displays; layout metrics were recomputed and no longer line-wrap
+  unexpectedly. No copy was rewritten.
+
+### Server
+
+- **`POST /page_verdict` accepts `"submitted"` and `"approved"`.** Previously
+  it only accepted `"approved"`; the adjuster could not record a submission
+  so it had to live entirely in app memory.
+- **`POST /reject_doc`** persists verdict, reason, note, and tag on the page.
+  Three-field validation — reason, note, and tag are all required; the response
+  is `400` with the missing field named if any are blank.
+
+### Known issues
+
+- The v2 app URL has moved. It used to live on
+  `https://ocr-beta.dobbinscodex.cloud`; the canonical URL is now
+  `https://ocr.dobbinscodex.cloud`. The `ocr-beta` host may briefly return
+  `503` — that was a deploy in flight, not an outage. Update any saved links.
+
+---
+
 ## 2026-08-14 — Repo created; review app built and hardened
 
 ### Repo set up

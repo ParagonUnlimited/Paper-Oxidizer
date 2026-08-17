@@ -23,7 +23,7 @@ interface TableT {
   suspect: string[]; bad: number; words: number;
 }
 interface Other { by: string; text: string; note: string; when: string }
-interface Approval { by: string; status: string }
+interface Approval { by: string; status: string; when?: string }
 interface Page {
   pageId: number; docPage: number; text: string; spans: Span[];
   src?: string;                      // "mistral" or adjust:reocr:v2 etc.
@@ -91,14 +91,18 @@ function drawFilters(): void {
 }
 
 // The pipeline readout: effective states across both reviewers, hold trumps.
+// The pending count is the union of "submitted" + "held" + "approved" —
+// anything that left the queue — because those documents are the others'
+// workload already, and the to-review count should not include them.
 function drawCounts(): void {
-  const c = { r: 0, s: 0, f: 0, h: 0 };
+  const c = { r: 0, s: 0, f: 0, h: 0, p: 0 };
   for (const d of Q) {
     if (d.state === 'approved') c.f++;
     else if (d.state === 'hold') c.h++;
     else if (d.state === 'submitted') c.s++;
     else if (d.flagged) c.r++;
   }
+  c.p = c.r + c.s + c.f + c.h;
   $('counts').innerHTML =
     `<span class=cr><b>${c.r}</b> to review</span>` +
     `<span class=cs><b>${c.s}</b> submitted</span>` +
@@ -341,32 +345,122 @@ function readTables(): Array<{ id: string; format: string; content: string }> {
 }
 
 // ---- dirty tracking ----------------------------------------------------------
+//
+// IMPORTANT: Submit and Finalize are two different actions with two different
+// gates. The next-document-class crash on 2026-08-16 was caused by clicking
+// the Finalize button when the intent was to Submit (the same Teal button was
+// the largest and brightest). The fix is to make the verbs un-mistakeable,
+// gate Submit on "every page has been touched" (the worker needs an
+// artifact of intent per page), and gate Finalize on "every page has been
+// both submitted and finalized".
+//
+// Page states derive from these flags:
+//   saved      — a human edit row exists for this page
+//   submitted  — page_verdict submitted; the worker has run
+//   approved   — page_verdict approved; this page is Finalized
+// The whole document is Finalizable only when every page is approved.
+function reviewedPages(): { saved: number; submitted: number; approved: number } {
+  if (!D) return { saved: 0, submitted: 0, approved: 0 };
+  let saved = 0, submitted = 0, approved = 0;
+  for (const p of D.pages) {
+    if (p.corrected != null) saved++;
+    if ((p.approvals || []).some(a => a.status === 'submitted')) submitted++;
+    if ((p.approvals || []).some(a => a.status === 'approved')) approved++;
+  }
+  return { saved, submitted, approved };
+}
+
 function mark(): void {
   dirty = true;
   $('st').textContent = 'unsaved';
-  $('bok').textContent = 'Save + Submit ▶';
+  refreshActionBar();
 }
 function unmark(): void {
   dirty = false;
-  $('bok').textContent = 'Submit ▶';
+  $('st').textContent = 'saved ' + new Date().toLocaleTimeString();
+  refreshActionBar();
+}
+
+// The action bar is the part Jeff misread. Three distinct verbs, three
+// distinct colours, three distinct gates. Sizes are scaled up from the v1
+// defaults because the original buttons were too small alongside the 4-pane
+// content (the count text was nearly illegible on a 13" screen).
+function refreshActionBar(): void {
+  const r = reviewedPages();
+  const total = D ? D.pages.length : 0;
+  const allTouched = r.saved === total && total > 0;
+  const allFinal = r.approved === total && total > 0;
+  const live = document.querySelector<HTMLButtonElement>('#bok');
+  const finalize = document.querySelector<HTMLButtonElement>('#bfin');
+  const reject = document.querySelector<HTMLButtonElement>('#brej');
+  if (live) {
+    live.disabled = !allTouched;
+    live.title = !allTouched
+      ? `Save at minimum — every page must be edited before Submit (${r.saved}/${total} touched).`
+      : 'Hand off to the pipeline for fixes and re-OCR.';
+    live.textContent = !allTouched
+      ? `Submit ▶ (${r.saved}/${total} touched)`
+      : 'Submit ▶';
+  }
+  if (finalize) {
+    finalize.disabled = !allFinal;
+    finalize.title = !allFinal
+      ? `Mark every page as approved before Finalize (${r.approved}/${total}).`
+      : 'Approved by every page — moves to the build queue.';
+    finalize.textContent = !allFinal
+      ? `Approve Final (${r.approved}/${total})`
+      : '✔ Approve Final';
+  }
+  if (reject) {
+    reject.disabled = false;
+    reject.title = 'Send back to the reviewer with a reason (popover).';
+  }
+  const sb = document.querySelector<HTMLElement>('#statusbar');
+  if (sb) {
+    sb.textContent =
+      `reviewed ${r.saved}/${total} · submitted ${r.submitted}/${total} · ` +
+      `approved ${r.approved}/${total}`;
+  }
 }
 
 // ---- render -------------------------------------------------------------------
-function pageApproved(p: Page): boolean {
-  return (p.approvals || []).some(a => a.status === 'approved');
+function pageStatus(p: Page): string {
+  const s = (p.approvals || []).map(a => a.status);
+  if (s.includes('approved')) return 'approved';
+  if (s.includes('submitted')) return 'submitted';
+  if (p.corrected != null) return 'touched';
+  return 'untouched';
 }
 
 function drawPageStrip(): void {
   if (!D) return;
-  $('pagestrip').innerHTML = D.pages.map((p, n) =>
-    `<span class="pgdot ${n === i ? 'cur' : ''} ${pageApproved(p) ? 'ok' : ''}"
-       data-n="${n}" title="page ${p.docPage}${pageApproved(p) ? ' — approved' : ''}">${
-       p.docPage}</span>`).join('');
-  $('pagestrip').querySelectorAll('.pgdot').forEach(el =>
+  $('pagestrip').innerHTML = D.pages.map((p, n) => {
+    const s = pageStatus(p);
+    return `<span class="pgdot ${n === i ? 'cur' : ''} ${s}"
+            data-n="${n}" data-st="${s}"
+            title="page ${p.docPage} — ${s}">${p.docPage}</span>`;
+  }).join('');
+  $('pagestrip').querySelectorAll('.pgdot').forEach(el => {
     el.addEventListener('click', () => {
       if (dirty && !confirm('Discard unsaved edits?')) return;
-      i = Number((el as HTMLElement).dataset.n); render();
-    }));
+      i = Number((el as HTMLElement).dataset.n);
+      render();
+    });
+    el.addEventListener('dblclick', e => {
+      // dblclick on a page dot toggles that page through the verdict cycle:
+      // untouched (or touched — saved but not yet submitted) -> submitted,
+      // submitted -> approved, approved -> submitted again (rolled back so
+      // a page can be re-finalized). Reading from D.pages[n] not D.pages[i]
+      // — the bug that gated every dot against the currently-shown page.
+      e.preventDefault();
+      const n = Number((el as HTMLElement).dataset.n);
+      i = n;                                  // also navigate, like the click
+      const ps = pageStatus(D!.pages[n]);
+      if (ps === 'submitted') { approvePage(); return; }
+      if (ps === 'approved')  { submitPage(); return; }
+      submitPage();                           // untouched OR touched
+    });
+  });
 }
 
 function render(): void {
@@ -403,9 +497,17 @@ function render(): void {
       `<div class=oc>${changed ? 'edited the text' : 'no text change'}</div></div>`;
   }).join('') ||
   '<div class=ob style="color:var(--dim2)">no other reviewer on this page</div>';
-  $('bpage').textContent = pageApproved(p) ? '✓ page approved' : '✓ Approve page';
+  const bpage = document.getElementById('bpage');
+if (bpage) bpage.textContent = pageStatus(p) === 'approved'
+  ? '✓ page approved' : '✓ Approve page';
   drawPageStrip();
+  // Render the source content (OCR text in document order with tables
+  // interleaved, formatted as block-multiline paragraphs) above the editable
+  // textarea. Read pane uses the same ordering, so the editor and the
+  // reader see the page identically.
+  drawEditableSource(p);
   unmark();
+  refreshActionBar();
   $('st').textContent = p.corrected != null
     ? ('saved' + (p.note ? ' · noted' : '')) : '';
 }
@@ -440,44 +542,73 @@ async function save(): Promise<void> {
 }
 
 // ALWAYS saves first — a verdict must never discard the edits or note that
-// justify it.
+// justify it. 0.2.2: Submit is gated on every page having a saved edit;
+// Approve Final is gated on every page being approved.
 async function setVerdict(v: string | null): Promise<void> {
   if (!D) return;
   if (dirty) await save();
   if (dirty) return;
+  if (v === 'submitted') {
+    const r = reviewedPages();
+    if (r.saved !== D.pages.length) {
+      $('st').textContent =
+        `Save every page first (${r.saved}/${D.pages.length}).`;
+      return;
+    }
+  }
   const j = await api<{ ok?: boolean; error?: string }>('/api/verdict',
     { id: D.id, verdict: v });
   if (j.error) { $('st').textContent = 'FAILED: ' + j.error; return; }
   Q[cur].verdict = v;
   Q[cur].state = effState(Q[cur]);
   drawCounts(); drawFilters(); drawList();
+  refreshActionBar();
   const nx = visible().find(([d, n]) => n !== cur && d.state === 'unreviewed');
   if (nx) openDoc(nx[1]);
   else $('st').textContent = 'no unreviewed left in this filter';
-  refreshQueue();   // pick up the other reviewer's work while we're at it
+  refreshQueue();
 }
 
-// Page-level approval: the grain M3's pipeline triggers on. Saves first for
-// the same reason verdicts do.
+// Per-page Apply: marks ONE page submitted (the worker runs on it). Saves
+// first for the same reason verdicts do.
+async function submitPage(): Promise<void> {
+  if (!D) return;
+  if (dirty) await save();
+  if (dirty) return;
+  const p = D.pages[i];
+  const already = (p.approvals || []).some(a => a.status === 'submitted');
+  const j = await api<{ ok?: boolean; error?: string }>('/api/page_verdict',
+    { pageId: p.pageId, status: already ? null : 'submitted' });
+  if (j.error) { $('st').textContent = 'FAILED: ' + j.error; return; }
+  if (already) {
+    p.approvals = (p.approvals || []).filter(a =>
+      !(a.by === ME && a.status === 'submitted'));
+  } else {
+    p.approvals = [...(p.approvals || []),
+      {by: ME, status: 'submitted', when: new Date().toISOString()}];
+  }
+  drawPageStrip();
+  refreshActionBar();
+}
+// Per-page Approve: marks one page Final so the document-wide Finalize can fire.
 async function approvePage(): Promise<void> {
   if (!D) return;
   if (dirty) await save();
   if (dirty) return;
   const p = D.pages[i];
-  const already = pageApproved(p);
+  const already = (p.approvals || []).some(a => a.status === 'approved');
   const j = await api<{ ok?: boolean; error?: string }>('/api/page_verdict',
     { pageId: p.pageId, status: already ? null : 'approved' });
   if (j.error) { $('st').textContent = 'FAILED: ' + j.error; return; }
   if (already) {
-    p.approvals = (p.approvals || []).filter(a => a.by !== ME);
-    Q[cur].pagesApproved = Math.max(0, Q[cur].pagesApproved - 1);
+    p.approvals = (p.approvals || []).filter(a =>
+      !(a.by === ME && a.status === 'approved'));
   } else {
-    p.approvals = [...(p.approvals || []), { by: ME, status: 'approved' }];
-    Q[cur].pagesApproved += 1;
+    p.approvals = [...(p.approvals || []),
+      {by: ME, status: 'approved', when: new Date().toISOString()}];
   }
-  drawList(); render();
-  // Auto-advance on approve: the fast keyboard path through a document.
-  if (!already && i < D.pages.length - 1) { i++; render(); }
+  drawPageStrip();
+  refreshActionBar();
 }
 
 // ---- tags -----------------------------------------------------------------------
@@ -514,6 +645,72 @@ function addTag(v: string): void {
   pushTags(t);
 }
 
+// ---- reject popover (0.2.2) -----------------------------------------------
+// Server endpoint: POST /api/reject with body {id, reason, note, tag}.
+// The popover markup is the static SHELL block at id=rejectpop.
+function openRejectPopover(): void {
+  const pop = $('rejectpop');
+  const wasHidden = pop.hasAttribute('hidden');
+  pop.toggleAttribute('hidden', !wasHidden);
+  if (wasHidden) ($('rejreason') as HTMLSelectElement).focus();
+}
+function closeRejectPopover(): void {
+  $('rejectpop').setAttribute('hidden', '');
+  ($('rejreason') as HTMLSelectElement).value = '';
+  ($('rejnote') as HTMLTextAreaElement).value = '';
+  ($('rejtagsel') as HTMLSelectElement).value = '';
+}
+async function confirmReject(): Promise<void> {
+  if (!D) return;
+  let reason = ($('rejreason') as HTMLSelectElement).value;
+  if (!reason) {
+    $('st').textContent = 'pick a reason first';
+    ($('rejreason') as HTMLSelectElement).focus();
+    return;
+  }
+  if (reason === '__other') {
+    const custom = (prompt('Rejection reason (plain text):') || '').trim();
+    if (!custom) return;                       // cancelled
+    reason = custom;
+  }
+  const note = ($('rejnote') as HTMLTextAreaElement).value.trim();
+  let tag = ($('rejtagsel') as HTMLSelectElement).value;
+  if (tag === '__custom') {
+    const t = (prompt('Tag:') || '').trim();
+    if (!t) tag = '';
+    else tag = t;
+  }
+  const j = await api<{ ok?: boolean; error?: string }>('/api/reject',
+    { id: D.id, reason, note, tag: tag || null });
+  if (j.error) { $('st').textContent = 'REJECT FAILED: ' + j.error; return; }
+  // Mirror the server-side verdict onto the queue row so counts and the
+  // sidebar list reflect the rejection immediately.
+  Q[cur].verdict = 'rejected';
+  Q[cur].state = effState(Q[cur]);
+  drawCounts(); drawFilters(); drawList(); drawTags();
+  refreshActionBar();
+  closeRejectPopover();
+  refreshQueue();                              // pull peers' state too
+  $('st').textContent = 'sent back: ' + reason;
+}
+
+// The editable pane shows the OCR text + tables in document order as
+// block-multiline paragraphs, mirroring the read pane's ordering. Tables
+// arrive inlined as sanitized <table> blocks (same sanitizeTable path
+// the read pane uses), surrounded by paragraphs split on blank lines.
+function drawEditableSource(p: Page): void {
+  const host = $('ed-source');
+  if (!host) return;
+  const html = inlineTables(p.text, p);
+  const blocks = html.split(/\n\s*\n/).map(b => b.trim()).filter(b => b);
+  if (!blocks.length) {
+    host.innerHTML = '<i style="color:var(--dim2)">empty page</i>';
+    return;
+  }
+  host.innerHTML = blocks
+    .map(b => `<p class=ebp>${b.replace(/\n/g, '<br>')}</p>`).join('');
+}
+
 // ---- shell ------------------------------------------------------------------------
 const SHELL = `
 <div id=side>
@@ -524,7 +721,43 @@ const SHELL = `
   <div id=notewrap>
     <div class=nh id=noteh>note — what is wrong with this page?</div>
     <textarea id=note spellcheck=true placeholder="e.g. table is a repetition loop, ~13 invented rows · merchant name misread · handwriting unreadable, do not embed a guess"></textarea>
+    <div class=noterow>
+      <span class=nrl>+ tag</span>
+      <select id=tagsel>
+        <option value="">+ tag</option>
+        <option>needs-reocr</option><option>illegible</option>
+        <option>reading-order</option><option>bad-geometry</option>
+        <option>repetition</option><option>handwriting</option>
+        <option value="__custom">custom…</option>
+      </select>
+    </div>
     <div id=others></div>
+  </div>
+</div>
+<div id=rejectpop hidden>
+  <div>Send back to the reviewer with a reason.</div>
+  <select id=rejreason>
+    <option value="">— required —</option>
+    <option>illigible</option><option>needs-reocr</option>
+    <option>repetition</option><option>bad-geometry</option>
+    <option>reading-order</option><option>handwriting</option>
+    <option value="__other">other (write note)…</option>
+  </select>
+  <textarea id=rejnote placeholder="what is wrong? (the reviewer will see this)"
+    spellcheck=true></textarea>
+  <div id=rejtagwrap>
+    <span>+ tag</span>
+    <select id=rejtagsel>
+      <option value="">+ tag</option>
+      <option>needs-reocr</option><option>illegible</option>
+      <option>reading-order</option><option>bad-geometry</option>
+      <option>repetition</option><option>handwriting</option>
+      <option value="__custom">custom…</option>
+    </select>
+  </div>
+  <div id=rejactions>
+    <button id=rejclose>Cancel</button>
+    <button id=rejconfirm>↩ Reject</button>
   </div>
 </div>
 <div id=main>
@@ -532,19 +765,17 @@ const SHELL = `
     <button class=small id=btoglist title="[ key">☰ list</button>
     <button class=small id=btogdiff title="] key">diff</button>
     <button id=bprev>◀ page</button><b id=pn>—</b><button id=bnext>page ▶</button>
-    <button id=bsave>Save page</button>
-    <button id=bpage class=final title="Approves THIS page. A document becomes final when every page is approved — that is what triggers embed → PDF/A → QC → Papra.">✓ Approve page</button>
-    <button class=primary id=bok title="Saves first, then marks the document SUBMITTED — edits done, pending application and re-upload (v2/v3)">Submit ▶</button>
-    <button class=final id=bfin title="Saves first, then marks the whole document FINAL">✔ Approve Final</button>
-    <button class=hold id=bhold title="Saves first, then marks the document DO NOT EMBED">⏸ Hold</button>
+    <span id=statusbar>reviewed 0/0 · submitted 0/0 · approved 0/0</span>
+    <button id=bsave title="Save this page's edits and notes — required before Submit.">Save page</button>
+    <!-- 0.2.2: removed the per-page "Approve page" button. It muddied the
+         flow (Jeff clicked "Approve Final" thinking it was the next step after
+         Submit). Approval is now driven by the whole-document Finalize bar. -->
+    <button class=primary id=bok disabled
+      title="Save at minimum — every page must be edited before Submit.">Submit ▶</button>
+    <button class=final id=bfin disabled
+      title="Mark every page as approved before Finalize.">✔ Approve Final</button>
+    <button class=hold id=brej>↩ Reject</button>
     <span id=tags></span>
-    <select id=tagsel>
-      <option value="">+ tag</option>
-      <option>needs-reocr</option><option>illegible</option>
-      <option>reading-order</option><option>bad-geometry</option>
-      <option>repetition</option><option>handwriting</option>
-      <option value="__custom">custom…</option>
-    </select>
     <span id=st></span>
   </div>
   <div id=pagestrip></div>
@@ -563,8 +794,13 @@ const SHELL = `
       <span id=bc></span></div><div class=pb><pre id=orig></pre></div></div>
     <div class=pane><div class=ph><span>your correction (editable)</span>
       <span id=tc></span></div>
-      <div class=pb><textarea id=ed spellcheck=false></textarea>
-        <div id=tbl></div></div>
+      <div class=pb style="display:flex;flex-direction:column;padding:0">
+        <div id=prev_note>Note this page before editing: the button row
+          under the note saves it back to the server.</div>
+        <div id=ed-source title="OCR text in document order with tables interleaved — for reference while you edit"></div>
+        <textarea id=ed spellcheck=false></textarea>
+        <div id=tbl></div>
+      </div>
     </div>
     <div class=pane id=p-diff><div class=ph><span>diff</span>
       <select id=dm>
@@ -592,10 +828,11 @@ export async function mount(root: HTMLElement, me: string): Promise<void> {
   $('bprev').addEventListener('click', () => pg(-1));
   $('bnext').addEventListener('click', () => pg(1));
   $('bsave').addEventListener('click', save);
-  $('bpage').addEventListener('click', approvePage);
   $('bok').addEventListener('click', () => setVerdict('submitted'));
   $('bfin').addEventListener('click', () => setVerdict('approved'));
-  $('bhold').addEventListener('click', () => setVerdict('hold'));
+  $('brej').addEventListener('click', openRejectPopover);
+  $('rejclose').addEventListener('click', closeRejectPopover);
+  $('rejconfirm').addEventListener('click', confirmReject);
   $('bzout').addEventListener('click', () => zoom(-1));
   $('bzin').addEventListener('click', () => zoom(1));
   $('bzfit').addEventListener('click', zfit);
@@ -633,6 +870,10 @@ export async function mount(root: HTMLElement, me: string): Promise<void> {
 
   Q = await api<QueueDoc[]>('/api/queue');
   drawCounts(); drawFilters(); drawList();
+  // Paint the action-bar gates before any document is opened so Submit /
+  // Finalize start disabled on first render — even on the empty-queue
+  // boot path that skips openDoc().
+  refreshActionBar();
   const first = Q.findIndex(d => d.flagged && d.state === 'unreviewed');
   if (Q.length) openDoc(first >= 0 ? first : 0);
 

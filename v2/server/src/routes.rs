@@ -433,10 +433,18 @@ pub async fn set_tags(pool: &Pool, did: i64, tags: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// NEW in v2: page-level approval. status 'approved' upserts; None clears.
+/// NEW in v2: page-level review. The 0.2.2 fix made the flow 3-step
+/// (Submitted → Approved), because the 2026-08-16 Jeff-incident was him
+/// clicking Approve Final when he meant Submit. Server accepts either
+/// 'submitted' or 'approved'; None clears the row.
 pub async fn page_verdict(pool: &Pool, page_id: i64, status: Option<&str>,
                           reviewer: &str) -> Result<()> {
     let client = pool.get().await?;
+    if let Some(s) = status {
+        if s != "submitted" && s != "approved" {
+            return Err(anyhow::anyhow!("bad page status"));
+        }
+    }
     match status {
         Some(st) => {
             client.execute(
@@ -454,5 +462,57 @@ pub async fn page_verdict(pool: &Pool, page_id: i64, status: Option<&str>,
             ).await?;
         }
     }
+    Ok(())
+}
+
+/// 0.2.2: the rejection path. A reviewer sends a document back with a reason
+/// + optional note + tag. Stored on the document's review meta as
+/// verdict='rejected' alongside the reason/note/tag so the round-trip is
+/// auditable. Tags dedup case-insensitively against existing tags.
+pub async fn reject_doc(
+    pool: &Pool, did: i64, reviewer: &str, reason: &str,
+    note: &str, tag: Option<&str>,
+) -> Result<()> {
+    if reason.trim().is_empty() {
+        return Err(anyhow::anyhow!("rejection requires a reason"));
+    }
+    let client = pool.get().await?;
+
+    let mut tags: Vec<String> = Vec::new();
+    if let Some(row) = client
+        .query_opt("select meta->'tags' from document where id = $1",
+        &[&did]).await?
+    {
+        let v: Option<serde_json::Value> = row.get::<_, Option<serde_json::Value>>(0);
+        if let Some(serde_json::Value::Array(arr)) = v {
+            for x in arr {
+                if let Some(s) = x.as_str() { tags.push(s.to_lowercase()); }
+            }
+        }
+    }
+    if let Some(t) = tag {
+        let t = t.trim().to_lowercase();
+        if !t.is_empty() && !tags.iter().any(|x| x == &t) { tags.push(t); }
+    }
+
+    let mut rev = serde_json::Map::new();
+    rev.insert("verdict".into(), serde_json::Value::String("rejected".into()));
+    rev.insert("reason".into(), serde_json::Value::String(reason.into()));
+    if !note.trim().is_empty() {
+        rev.insert("note".into(), serde_json::Value::String(note.into()));
+    }
+    let rev = serde_json::Value::Object(rev);
+    let tags = serde_json::json!(tags);
+
+    client.execute(
+        "update document set
+            meta = coalesce(meta,'{}'::jsonb) ||
+              jsonb_build_object('ocr_review',
+                coalesce(meta->'ocr_review','{}'::jsonb) ||
+                  jsonb_build_object($1::text, $2::jsonb)) ||
+              jsonb_build_object('tags', $3::jsonb)
+          where id = $4",
+        &[&reviewer, &rev, &tags, &did],
+    ).await?;
     Ok(())
 }

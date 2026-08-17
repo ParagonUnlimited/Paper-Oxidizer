@@ -96,6 +96,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/verdict", post(api_verdict))
         .route("/api/tags", post(api_tags))
         .route("/api/page_verdict", post(api_page_verdict))
+        .route("/api/reject", post(api_reject))
         .fallback_service(static_dir)
         .with_state(app.clone());
 
@@ -264,11 +265,33 @@ struct PageVerdictBody {
 async fn api_page_verdict(State(app): State<S>, headers: HeaderMap,
                           Json(b): Json<PageVerdictBody>) -> Response {
     let Some(me) = who(&app, &headers) else { return unauthorized() };
-    if !matches!(b.status.as_deref(), None | Some("approved") | Some("flagged")) {
+    if !matches!(b.status.as_deref(),
+        None | Some("submitted") | Some("approved"))
+    {
         return (StatusCode::BAD_REQUEST,
                 Json(json!({"error": "bad status"}))).into_response();
     }
     match routes::page_verdict(&app.pool, b.page_id, b.status.as_deref(), &me).await {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => err500(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct RejectBody {
+    id: i64,
+    reason: String,
+    note: String,
+    tag: Option<String>,
+}
+async fn api_reject(State(app): State<S>, headers: HeaderMap,
+                    Json(b): Json<RejectBody>) -> Response {
+    let Some(me) = who(&app, &headers) else { return unauthorized() };
+    if b.reason.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST,
+                Json(json!({"error": "reason required"}))).into_response();
+    }
+    match routes::reject_doc(&app.pool, b.id, &me, &b.reason, &b.note, b.tag.as_deref()).await {
         Ok(()) => Json(json!({"ok": true})).into_response(),
         Err(e) => err500(e),
     }
