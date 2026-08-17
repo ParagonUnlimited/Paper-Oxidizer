@@ -68,25 +68,44 @@ const FILTERS: Record<string, [string, (d: QueueDoc) => boolean]> = {
 };
 let FILTER = 'flagged';
 let SEARCH = '';
+let TAG_FILTER = '';
 
 function visible(): Array<[QueueDoc, number]> {
   const f = FILTERS[FILTER][1];
   const s = SEARCH.toLowerCase();
+  const t = TAG_FILTER.toLowerCase();
   return Q.map((d, n) => [d, n] as [QueueDoc, number]).filter(([d]) =>
     f(d) && (!s || (d.key || '').toLowerCase().includes(s) ||
-             (d.tags || []).some(t => t.toLowerCase().includes(s))));
+             (d.tags || []).some(x => x.toLowerCase().includes(s))) &&
+    (!t || (d.tags || []).some(x => x.toLowerCase() === t)));
 }
 
 function drawFilters(): void {
-  $('filters').innerHTML = Object.entries(FILTERS).map(([k, [label]]) => {
+  const html = Object.entries(FILTERS).map(([k, [label]]) => {
     const n = Q.filter(FILTERS[k][1]).length;
     return `<span class="chip ${k === FILTER ? 'on' : ''}" data-f="${k}"
       title="${n} document(s)">${esc(label)}</span>`;
   }).join('');
-  $('filters').querySelectorAll('.chip').forEach(el =>
-    el.addEventListener('click', () => {
-      FILTER = (el as HTMLElement).dataset.f!;
+  // Tag chip strip — click to filter the list by that tag.
+  const tagSet = new Set<string>();
+  for (const d of Q) (d.tags || []).forEach((t: string) => tagSet.add(t));
+  const tagChips = Array.from(tagSet).sort().map(t =>
+    `<span class="chip tag ${t.toLowerCase() === TAG_FILTER ? 'on' : ''}"
+      data-tag="${esc(t)}"
+      title="filter list by tag">${esc(t)} ${t.toLowerCase() === TAG_FILTER ? '✕' : ''}</span>`
+  ).join('');
+  $('filters').innerHTML = html + (tagChips ? '<span class=chip-sep></span>' + tagChips : '');
+  $('filters').querySelectorAll<HTMLElement>('.chip').forEach(el =>
+    el.addEventListener('click', e => {
+      const t = el.dataset.tag;
+      if (t !== undefined) {
+        TAG_FILTER = (TAG_FILTER === t.toLowerCase()) ? '' : t.toLowerCase();
+      } else {
+        FILTER = el.dataset.f!;
+        TAG_FILTER = '';
+      }
       drawFilters(); drawList();
+      e.stopPropagation();
     }));
 }
 
@@ -154,7 +173,10 @@ function drawList(): void {
        Object.keys(d.peers || {}).length ? ` <span class=pk>${
          Object.entries(d.peers).map(([w, v]) =>
            `${esc(w)}:${(VICON[v] || '?').trim()}`).join(' ')}</span>` : ''}${
-       (d.tags || []).map(t => `<span class=tag>${esc(t)}</span>`).join('')}</span>
+       (d.tags || []).map(t =>
+         `<span class="tag ${t.toLowerCase() === TAG_FILTER ? 'on' : ''}"
+           data-tag="${esc(t)}">${esc(t)}${
+             t.toLowerCase() === TAG_FILTER ? ' ✕' : ''}</span>`).join('')}</span>
      <span class=m>${d.repeats
        ? `<b style="color:var(--warn)">${d.maxRep} identical rows in a row</b> · ` : ''}${
        d.rate}% text${d.twords ? ` · ${d.allRate}% w/tables` : ''} · ${
@@ -166,6 +188,15 @@ function drawList(): void {
   $('list').querySelectorAll('.q[data-n]').forEach(el =>
     el.addEventListener('click', () =>
       openDoc(Number((el as HTMLElement).dataset.n))));
+  // Tag chips inside doc rows: click to filter the list by that tag, don't
+  // open the doc.
+  $('list').querySelectorAll<HTMLElement>('.tag[data-tag]').forEach(el =>
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const t = (el.dataset.tag || '').toLowerCase();
+      TAG_FILTER = (TAG_FILTER === t) ? '' : t;
+      drawFilters(); drawList();
+    }));
 }
 
 // ---- scan zoom / pan (ported intact from v1) -------------------------------
@@ -476,10 +507,27 @@ function drawPageStrip(): void {
   if (!D) return;
   $('pagestrip').innerHTML = D.pages.map((p, n) => {
     const s = pageStatus(p);
-    return `<span class="pgdot ${n === i ? 'cur' : ''} ${s}"
+    const tags = (p as Page & { tags?: string[] }).tags || [];
+    const tagHtml = tags.map(t =>
+      `<span class="pg-tag" data-tag="${esc(t)}">${esc(t)}</span>`).join('');
+    return `<div class="pgdot ${n === i ? 'cur' : ''} ${s}"
             data-n="${n}" data-st="${s}"
-            title="page ${p.docPage} — ${s}">${p.docPage}</span>`;
+            title="page ${p.docPage} — ${s}${tags.length ? ' · tags: ' + tags.join(', ') : ''}">
+       <span class=pg-num>${p.docPage}</span>
+       <span class=pg-state>${s}</span>
+       ${tagHtml}
+     </div>`;
   }).join('');
+  // Tag chips inside the page-strip also toggle TAG_FILTER on the list view
+  // so reviewers can jump from "this page needs reocr" to "every page in
+  // this doc that needs reocr".
+  $('pagestrip').querySelectorAll<HTMLElement>('.pg-tag[data-tag]').forEach(el =>
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const t = (el.dataset.tag || '').toLowerCase();
+      TAG_FILTER = (TAG_FILTER === t) ? '' : t;
+      drawFilters(); drawList();
+    }));
   $('pagestrip').querySelectorAll('.pgdot').forEach(el => {
     el.addEventListener('click', () => {
       if (dirty && !confirm('Discard unsaved edits?')) return;
@@ -768,7 +816,7 @@ const SHELL = `
         <option>needs-reocr</option><option>illegible</option>
         <option>reading-order</option><option>bad-geometry</option>
         <option>repetition</option><option>handwriting</option>
-        <option value="__custom">custom…</option>
+      </select>
       </select>
     </div>
     <div id=others></div>
@@ -792,7 +840,6 @@ const SHELL = `
       <option>needs-reocr</option><option>illegible</option>
       <option>reading-order</option><option>bad-geometry</option>
       <option>repetition</option><option>handwriting</option>
-      <option value="__custom">custom…</option>
     </select>
   </div>
   <div id=rejactions>
@@ -812,11 +859,7 @@ const SHELL = `
          Submit). Approval is now driven by the whole-document Finalize bar. -->
     <button class=primary id=bok disabled
       title="Save at minimum — every page must be edited before Submit.">Submit ▶</button>
-    <button class=final id=bfin disabled
-      title="Mark every page as approved before Finalize.">✔ Approve Final</button>
-    <button class=hold id=brej>↩ Reject</button>
-    <button id=bunapp hidden
-      title="Undo a Final that was clicked by mistake — clears your verdict + your approved pages for this document.">↩ Unapprove Final</button>
+    <button id=brej>↩ Reject</button>
     <span id=tags></span>
     <span id=st></span>
   </div>
@@ -871,7 +914,6 @@ export async function mount(root: HTMLElement, me: string): Promise<void> {
   $('bnext').addEventListener('click', () => pg(1));
   $('bsave').addEventListener('click', save);
   $('bok').addEventListener('click', () => setVerdict('submitted'));
-  $('bfin').addEventListener('click', () => setVerdict('approved'));
   $('brej').addEventListener('click', openRejectPopover);
   $('rejclose').addEventListener('click', closeRejectPopover);
   $('rejconfirm').addEventListener('click', confirmReject);

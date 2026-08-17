@@ -198,17 +198,30 @@ td:focus { outline: 2px solid var(--accent); background: var(--lvl3); }
   display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px;
 }
 
-/* page-approval strip under the bar */
+/* page-approval strip under the bar -- same height as the rest of the bar
+   so it's actually visible. Each tile shows page number + state label +
+   tags. Dblclick cycles the page through the verdict ladder. */
 #pagestrip {
-  display: flex; gap: 3px; padding: 4px 12px; background: var(--panel);
+  display: flex; gap: 6px; padding: 6px 12px; background: var(--panel);
   border-bottom: 1px solid var(--line); overflow-x: auto;
+  min-height: 38px;
 }
 .pgdot {
-  min-width: 22px; text-align: center; font: 510 11px/1.8 var(--font);
-  border: 1px solid var(--line2); border-radius: 4px; color: var(--dim);
-  cursor: pointer; user-select: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 6px;
+  font: 510 12px/1.4 var(--font); color: var(--dim);
+  border: 1px solid var(--line2); background: var(--lvl3);
+  cursor: pointer; user-select: none; white-space: nowrap;
 }
-.pgdot.cur { border-color: var(--accent); color: var(--fg); }
+.pgdot:hover { background: var(--hover); }
+.pgdot.cur  { border-color: var(--accent); color: var(--fg);
+              background: rgba(113, 112, 255, .18); }
+.pgdot .pg-num   { font-weight: 590; }
+.pgdot .pg-state { font-size: 10.5px; color: var(--dim2); }
+.pgdot .pg-tag   { font: 510 10px/1.2 var(--font);
+                  padding: 1px 6px; border-radius: 9999px;
+                  background: rgba(113, 112, 255, .16);
+                  color: var(--accent-h); }
 /* Per-page verdict states — touched = saved but no verdict, submitted =
    in the worker queue, approved = final. untouched is the base style. */
 .pgdot.touched   { background: rgba(113, 112, 255, .14); color: var(--accent-h);
