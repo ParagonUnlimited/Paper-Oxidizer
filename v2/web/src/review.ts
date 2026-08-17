@@ -416,15 +416,10 @@ function unmark(): void {
 // distinct colours, three distinct gates. Sizes are scaled up from the v1
 // defaults because the original buttons were too small alongside the 4-pane
 // content (the count text was nearly illegible on a 13" screen).
-// 0.2.2 hotfix: detect unsaved work on the CURRENT doc so Approve Final
-// can't fire while edits/notes are pending. Per-page: textarea differs from
-// saved corrected text. Per-doc: notes textarea differs from saved note.
-function pendingSaves(p: Page, curText: string): string[] {
-  const reasons: string[] = [];
-  const saved = p.corrected != null ? p.corrected : '';
-  if (curText !== saved) reasons.push(`page ${p.docPage}: edits unsaved`);
-  return reasons;
-}
+// 0.2.2 hotfix: the dirty flag fires on EVERY input event for the
+// corrections or notes textarea, AND on every tag select/click. The
+// Approve Final gate closes on the first character typed or first tag
+// chosen — same instant. (Alden/Jeff, 2026-08-17.)
 
 function refreshActionBar(): void {
   const r = reviewedPages();
@@ -436,16 +431,11 @@ function refreshActionBar(): void {
   const reject = document.querySelector<HTMLButtonElement>('#brej');
   const unapp = document.querySelector<HTMLButtonElement>('#bunapp');
 
-  // The CURRENT page's edits, plus the doc-wide notes (shared across pages).
-  // Approve Final must require BOTH no-pending-edits AND all-pages-approved.
+  // Single instant gate: ANY character typed or tag selected = pending.
+  // The textarea `input` event, the tag select `change` event, and the
+  // tag-chip click handler all call `mark()`. Save clears it again.
   const currentPage = D && D.pages[i] ? D.pages[i] : null;
-  const curText = currentPage ? ($('ed') as HTMLTextAreaElement).value : '';
-  const curNote = currentPage ? ($('note') as HTMLTextAreaElement).value : '';
-  const savedNote = currentPage ? (currentPage.note || '') : '';
-  const editPending = currentPage
-    ? pendingSaves(currentPage, curText).length > 0 : false;
-  const notePending = currentPage ? (curNote !== savedNote) : false;
-  const pending = editPending || notePending;
+  const pending = dirty && currentPage != null;
 
   if (live) {
     live.disabled = !allTouched;
@@ -461,9 +451,9 @@ function refreshActionBar(): void {
     finalize.disabled = blocked;
     const why = !allFinal
       ? `Mark every page as approved before Finalize (${r.approved}/${total}).`
-      : (editPending ? 'Save edits first — Approve Final skips the worker.'
-         : notePending ? 'Save note first — Approve Final skips the worker.'
-         : '');
+      : pending
+        ? 'Pending edits/notes/tags — Save before Approve Final.'
+        : '';
     finalize.title = why || 'Approved by every page — moves to the build queue.';
     finalize.textContent = blocked
       ? (pending && !allFinal
@@ -490,7 +480,7 @@ function refreshActionBar(): void {
     sb.textContent =
       `reviewed ${r.saved}/${total} · submitted ${r.submitted}/${total} · ` +
       `approved ${r.approved}/${total}` +
-      (pending ? ' · pending edits/notes' : '');
+      (pending ? ' · pending edits/notes/tags' : '');
   }
 }
 
@@ -925,8 +915,13 @@ export async function mount(root: HTMLElement, me: string): Promise<void> {
   $('bzin').addEventListener('click', () => zoom(1));
   $('bzfit').addEventListener('click', zfit);
   $('dm').addEventListener('change', render);
-  $('tagsel').addEventListener('change', () =>
-    addTag(($('tagsel') as HTMLSelectElement).value));
+  // ANY change to edits/notes/tag must dirty the doc — Approve Final is
+  // gated on this. `mark()` fires on the textarea `input` events; the
+  // tag select `change` event; and from inside `addTag()`/`rmTag()`.
+  $('tagsel').addEventListener('change', () => {
+    mark();
+    addTag(($('tagsel') as HTMLSelectElement).value);
+  });
   $('search').addEventListener('input', e => {
     SEARCH = (e.target as HTMLInputElement).value; drawList();
   });
