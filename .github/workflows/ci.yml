@@ -20,7 +20,7 @@ jobs:
       run:
         working-directory: v2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo registry + build artifacts
@@ -43,7 +43,7 @@ jobs:
       run:
         working-directory: v2/web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -62,7 +62,7 @@ jobs:
     name: docker compose config validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate docker-compose.yml
         run: docker compose config --quiet
         # `docker compose config --quiet` exits non-zero if the file is malformed.
