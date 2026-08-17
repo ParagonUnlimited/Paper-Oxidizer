@@ -41,16 +41,18 @@ is green.
 
 ### Jeff's earlier-round feedback — *still pending*
 
-- [ ] **pageStrip** should be the **same height as the rest of the bar**
-  (the per-page dots should be obvious, not 4px tall).
-- [ ] **pageStrip** needs **labels** (not just dots): the visible state is
+- [x] **pageStrip** should be the **same height as the rest of the bar**
+  (the per-page dots should be obvious, not 4px tall). — done in 5c3f961.
+- [x] **pageStrip** needs **labels** (not just dots): the visible state is
   "page 7 of 41, untouched/submitted/approved/pending edits" rather than a
-  tiny coloured square.
-- [ ] **Filter by tag** in the list: show only pages with tag X (e.g.
-  `needs-reocr`) so the reviewer can group work.
-- [ ] **In-route page shows tag-selected pages listed** somewhere — when
+  tiny coloured square. — done in 5c3f961.
+- [x] **Filter by tag** in the list: show only pages with tag X (e.g.
+  `needs-reocr`) so the reviewer can group work. — done in 5c3f961.
+- [x] **In-route page shows tag-selected pages listed** somewhere — when
   `needs-reocr` is set on a page, the page header should show it as a
-  chip and the page-list filter should jump there.
+  chip and the page-list filter should jump there. — done in 5c3f961
+  (page-strip tiles show page tags; clicking a page-tag chip jumps the
+  list filter).
 
 ### Backend / infra
 
