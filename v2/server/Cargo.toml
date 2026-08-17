@@ -8,7 +8,7 @@ license.workspace = true
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["fs", "trace", "set-header"] }
+tower-http = { version = "0.7", features = ["fs", "trace", "set-header"] }
 
 # Postgres: tokio-postgres is the ONLY Rust client with sslnegotiation=direct
 # (>= 0.7.13). sqlx cannot do it (PR #3879 unmerged) and Cloudflare Gateway on
