@@ -97,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/tags", post(api_tags))
         .route("/api/page_verdict", post(api_page_verdict))
         .route("/api/reject", post(api_reject))
+        .route("/api/unapprove", post(api_unapprove))
         .fallback_service(static_dir)
         .with_state(app.clone());
 
@@ -292,6 +293,16 @@ async fn api_reject(State(app): State<S>, headers: HeaderMap,
                 Json(json!({"error": "reason required"}))).into_response();
     }
     match routes::reject_doc(&app.pool, b.id, &me, &b.reason, &b.note, b.tag.as_deref()).await {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => err500(e),
+    }
+}
+
+#[derive(Deserialize)]
+struct UnapproveBody { id: i64, }
+async fn api_unapprove(State(app): State<S>, headers: HeaderMap, Json(b): Json<UnapproveBody>) -> Response {
+    let Some(me) = who(&app, &headers) else { return unauthorized() };
+    match routes::unapprove_doc(&app.pool, b.id, &me).await {
         Ok(()) => Json(json!({"ok": true})).into_response(),
         Err(e) => err500(e),
     }

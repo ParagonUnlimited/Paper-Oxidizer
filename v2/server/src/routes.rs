@@ -417,6 +417,35 @@ pub async fn verdict(pool: &Pool, did: i64, value: Option<&str>, reviewer: &str)
     Ok(())
 }
 
+/// 0.2.2 hotfix: unapprove a document that was finalised by accident.
+/// Clears `verdict` and the per-page `approved` rows for THIS reviewer only,
+/// so the other reviewer's work is untouched. The document returns to the
+/// queue as unsubmitted for re-review.
+pub async fn unapprove_doc(pool: &Pool, did: i64, reviewer: &str) -> Result<()> {
+    let client = pool.get().await?;
+    client.execute(
+        "update document set meta = coalesce(meta,'{}'::jsonb) ||
+           jsonb_build_object('ocr_review',
+             coalesce(meta->'ocr_review','{}'::jsonb) -
+               'verdict' - 'approved' ||
+             jsonb_build_object($1::text, '{}'::jsonb))
+         where id = $2",
+        &[&reviewer, &did],
+    ).await?;
+    // Per-page approved rows for THIS reviewer, on THIS doc, only.
+    client.execute(
+        "delete from page_review pr
+         using ocr_reading r
+         where pr.page_id = r.page_id
+           and r.method = 'mistral-ocr-4-1'
+           and (r.meta->>'document_id')::bigint = $1
+           and pr.reviewer = $2
+           and pr.status = 'approved'",
+        &[&did, &reviewer],
+    ).await?;
+    Ok(())
+}
+
 /// Port of set_tags: shared document-level tags, deduped case-insensitively,
 /// order preserved, last write wins.
 pub async fn set_tags(pool: &Pool, did: i64, tags: &[String]) -> Result<()> {

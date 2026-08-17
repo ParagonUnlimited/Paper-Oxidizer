@@ -385,6 +385,16 @@ function unmark(): void {
 // distinct colours, three distinct gates. Sizes are scaled up from the v1
 // defaults because the original buttons were too small alongside the 4-pane
 // content (the count text was nearly illegible on a 13" screen).
+// 0.2.2 hotfix: detect unsaved work on the CURRENT doc so Approve Final
+// can't fire while edits/notes are pending. Per-page: textarea differs from
+// saved corrected text. Per-doc: notes textarea differs from saved note.
+function pendingSaves(p: Page, curText: string): string[] {
+  const reasons: string[] = [];
+  const saved = p.corrected != null ? p.corrected : '';
+  if (curText !== saved) reasons.push(`page ${p.docPage}: edits unsaved`);
+  return reasons;
+}
+
 function refreshActionBar(): void {
   const r = reviewedPages();
   const total = D ? D.pages.length : 0;
@@ -393,6 +403,19 @@ function refreshActionBar(): void {
   const live = document.querySelector<HTMLButtonElement>('#bok');
   const finalize = document.querySelector<HTMLButtonElement>('#bfin');
   const reject = document.querySelector<HTMLButtonElement>('#brej');
+  const unapp = document.querySelector<HTMLButtonElement>('#bunapp');
+
+  // The CURRENT page's edits, plus the doc-wide notes (shared across pages).
+  // Approve Final must require BOTH no-pending-edits AND all-pages-approved.
+  const currentPage = D && D.pages[i] ? D.pages[i] : null;
+  const curText = currentPage ? ($('ed') as HTMLTextAreaElement).value : '';
+  const curNote = currentPage ? ($('note') as HTMLTextAreaElement).value : '';
+  const savedNote = currentPage ? (currentPage.note || '') : '';
+  const editPending = currentPage
+    ? pendingSaves(currentPage, curText).length > 0 : false;
+  const notePending = currentPage ? (curNote !== savedNote) : false;
+  const pending = editPending || notePending;
+
   if (live) {
     live.disabled = !allTouched;
     live.title = !allTouched
@@ -403,23 +426,40 @@ function refreshActionBar(): void {
       : 'Submit ▶';
   }
   if (finalize) {
-    finalize.disabled = !allFinal;
-    finalize.title = !allFinal
+    const blocked = !allFinal || pending;
+    finalize.disabled = blocked;
+    const why = !allFinal
       ? `Mark every page as approved before Finalize (${r.approved}/${total}).`
-      : 'Approved by every page — moves to the build queue.';
-    finalize.textContent = !allFinal
-      ? `Approve Final (${r.approved}/${total})`
+      : (editPending ? 'Save edits first — Approve Final skips the worker.'
+         : notePending ? 'Save note first — Approve Final skips the worker.'
+         : '');
+    finalize.title = why || 'Approved by every page — moves to the build queue.';
+    finalize.textContent = blocked
+      ? (pending && !allFinal
+         ? `Approve Final (${r.approved}/${total} · pending)`
+         : !allFinal ? `Approve Final (${r.approved}/${total})`
+         : `Approve Final (${r.approved}/${total} · pending)`)
       : '✔ Approve Final';
   }
   if (reject) {
     reject.disabled = false;
     reject.title = 'Send back to the reviewer with a reason (popover).';
   }
+  // Unapprove only appears when THIS reviewer marked the doc Final. Lets Jeff
+  // hit the wrong button and recover within the same session.
+  if (unapp) {
+    const hereDoc: QueueDoc | null =
+      cur >= 0 && cur < Q.length ? (Q[cur] ?? null) : null;
+    const myFinal = !!hereDoc && hereDoc.verdict === 'approved';
+    unapp.style.display = myFinal ? '' : 'none';
+    unapp.disabled = !myFinal;
+  }
   const sb = document.querySelector<HTMLElement>('#statusbar');
   if (sb) {
     sb.textContent =
       `reviewed ${r.saved}/${total} · submitted ${r.submitted}/${total} · ` +
-      `approved ${r.approved}/${total}`;
+      `approved ${r.approved}/${total}` +
+      (pending ? ' · pending edits/notes' : '');
   }
 }
 
@@ -775,6 +815,8 @@ const SHELL = `
     <button class=final id=bfin disabled
       title="Mark every page as approved before Finalize.">✔ Approve Final</button>
     <button class=hold id=brej>↩ Reject</button>
+    <button id=bunapp hidden
+      title="Undo a Final that was clicked by mistake — clears your verdict + your approved pages for this document.">↩ Unapprove Final</button>
     <span id=tags></span>
     <span id=st></span>
   </div>
@@ -833,6 +875,7 @@ export async function mount(root: HTMLElement, me: string): Promise<void> {
   $('brej').addEventListener('click', openRejectPopover);
   $('rejclose').addEventListener('click', closeRejectPopover);
   $('rejconfirm').addEventListener('click', confirmReject);
+  $('bunapp').addEventListener('click', () => unapproveFinal());
   $('bzout').addEventListener('click', () => zoom(-1));
   $('bzin').addEventListener('click', () => zoom(1));
   $('bzfit').addEventListener('click', zfit);
@@ -880,4 +923,23 @@ export async function mount(root: HTMLElement, me: string): Promise<void> {
   // Keep two concurrent reviewers looking at the same reality.
   setInterval(refreshQueue, 45_000);
   addEventListener('focus', refreshQueue);
+}
+
+// 0.2.2 hotfix: undo a Final that was clicked by mistake. Server clears
+// verdict + the per-page approved rows for THIS reviewer only — the other
+// reviewer's work is untouched. UI mirrors the cleared state into Q[cur]
+// without a full refresh.
+async function unapproveFinal(): Promise<void> {
+  if (!D) return;
+  const j = await api<{ ok?: boolean; error?: string }>('/api/unapprove',
+    { id: D.id });
+  if (j.error) { $('st').textContent = 'UNAPPROVE FAILED: ' + j.error; return; }
+  Q[cur].verdict = null;
+  // The server cleared every per-page approved row for ME, so drop those
+  // approvals locally to mirror the cleared state on this doc.
+  for (const p of D.pages) {
+    p.approvals = (p.approvals || []).filter(a => a.by !== ME);
+  }
+  drawPageStrip(); refreshActionBar(); drawList(); drawCounts();
+  $('st').textContent = 'unapproved — back in the queue';
 }
