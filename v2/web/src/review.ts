@@ -859,6 +859,8 @@ const SHELL = `
          Submit). Approval is now driven by the whole-document Finalize bar. -->
     <button class=primary id=bok disabled
       title="Save at minimum — every page must be edited before Submit.">Submit ▶</button>
+    <button id=bfin disabled
+      title="The worker has finished; this is the FINAL check before the doc moves to build/Papra.">✔ Approve Final</button>
     <button id=brej>↩ Reject</button>
     <span id=tags></span>
     <span id=st></span>
@@ -914,6 +916,7 @@ export async function mount(root: HTMLElement, me: string): Promise<void> {
   $('bnext').addEventListener('click', () => pg(1));
   $('bsave').addEventListener('click', save);
   $('bok').addEventListener('click', () => setVerdict('submitted'));
+  $('bfin').addEventListener('click', () => setVerdict('approved'));
   $('brej').addEventListener('click', openRejectPopover);
   $('rejclose').addEventListener('click', closeRejectPopover);
   $('rejconfirm').addEventListener('click', confirmReject);

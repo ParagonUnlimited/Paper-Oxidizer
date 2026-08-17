@@ -97,6 +97,12 @@ is green.
   Reject popover.
 - [x] **2026-08-17**: Hotfix (`9efb40f`) — Approve Final gates on dirty
   edits/notes, Unapprove button + `/api/unapprove` endpoint.
+- [x] **2026-08-17**: Re-add `Approve Final` button (now visibly the
+  final-step) with the same dirty-edit/notes gate; vN tags are pipeline-only,
+  not user-facing. — done.
+- [x] **2026-08-17**: Full pipeline eli5 with the state diagram
+  flowchart, every API endpoint, every ocr_reading.method — written to
+  `docs/workflow-eli5.md` so it lives with the project. — done.
 
 ## Verification gate
 
